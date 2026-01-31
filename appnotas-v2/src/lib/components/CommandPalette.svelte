@@ -1,80 +1,139 @@
 <script lang="ts">
-	import { codeInsertRequested, fileInsertRequested } from '$lib/stores/shortcuts';
+	import { createEventDispatcher, onMount } from 'svelte';
 
-	let isOpen = false;
-	let selectedCommand: 'code' | 'file' | null = null;
+	const dispatch = createEventDispatcher();
 
 	const commands = [
 		{ id: 'code', label: '@code', description: 'Insert code snippet', icon: '📝' },
-		{ id: 'file', label: '@file', description: 'Link to a file', icon: '📁' }
+		{ id: 'file', label: '@file', description: 'Link to a file', icon: '📁' },
+		{ id: 'tasks', label: '@tasks', description: 'Insert checklist', icon: '✅' },
+		{ id: 'image', label: '@image', description: 'Insert image', icon: '🖼️' },
+		{ id: 'drawing', label: '@drawing', description: 'Insert drawing', icon: '🎨' },
+		{ id: 'style', label: '@style', description: 'Toggle editor formatting menus', icon: '✨' }
 	];
 
-	// Listen for command palette requests
-	$: if ($codeInsertRequested && !isOpen) {
-		open();
-	}
+	let searchQuery = '';
+	let selectedIndex = 0;
+	let inputElement: HTMLInputElement;
 
-	export function open() {
-		isOpen = true;
-		selectedCommand = null;
-	}
+	$: filteredCommands = commands.filter(cmd => 
+		cmd.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+		cmd.description.toLowerCase().includes(searchQuery.toLowerCase())
+	);
 
-	export function close() {
-		isOpen = false;
-		selectedCommand = null;
-	}
-
-	function selectCommand(commandId: 'code' | 'file') {
-		selectedCommand = commandId;
-		close();
-
-		// Trigger the appropriate action
-		if (commandId === 'code') {
-			window.dispatchEvent(new CustomEvent('openCodeDialog'));
-		} else if (commandId === 'file') {
-			window.dispatchEvent(new CustomEvent('openFileDialog'));
+	$: {
+		if (selectedIndex >= filteredCommands.length) {
+			selectedIndex = Math.max(0, filteredCommands.length - 1);
 		}
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			close();
+	onMount(() => {
+		inputElement?.focus();
+	});
+
+	function selectCommand(commandId: string) {
+		console.log('Command selected:', commandId);
+		
+		if (commandId === 'code') {
+			dispatch('openCodeDialog');
+		} else if (commandId === 'file') {
+			dispatch('openFileDialog');
+		} else if (commandId === 'list' || commandId === 'tasks') {
+			dispatch('openDialog', { id: 'tasks' });
+		} else if (commandId === 'image') {
+			dispatch('openDialog', { id: 'image' });
+		} else if (commandId === 'drawing') {
+			dispatch('openDialog', { id: 'drawing' });
+		} else if (commandId === 'style') {
+			dispatch('openDialog', { id: 'style' });
+		}
+	}
+
+	function handleKeyDown(e: KeyboardEvent) {
+		if (filteredCommands.length === 0) {
+			if (e.key === 'Escape') dispatch('close');
+			return;
+		}
+		
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			selectedIndex = (selectedIndex + 1) % filteredCommands.length;
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			selectedIndex = (selectedIndex - 1 + filteredCommands.length) % filteredCommands.length;
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			if (filteredCommands[selectedIndex]) {
+				selectCommand(filteredCommands[selectedIndex].id);
+			}
+		} else if (e.key === 'Escape') {
+			dispatch('close');
 		}
 	}
 </script>
 
-{#if isOpen}
-	<div class="command-palette" on:keydown={handleKeydown}>
-		<div class="command-list">
-			{#each commands as command}
-				<button class="command-item" on:click={() => selectCommand(command.id as 'code' | 'file')}>
-					<span class="command-icon">{command.icon}</span>
-					<div class="command-text">
-						<div class="command-label">{command.label}</div>
-						<div class="command-description">{command.description}</div>
-					</div>
-				</button>
-			{/each}
-		</div>
+<div class="command-palette">
+	<div class="palette-header">
+		<input
+			bind:this={inputElement}
+			bind:value={searchQuery}
+			on:keydown={handleKeyDown}
+			placeholder="Search commands... (e.g. @code)"
+			class="search-input"
+		/>
 	</div>
-{/if}
+	<div class="command-list">
+		{#each filteredCommands as command, i}
+			<button 
+				class="command-item" 
+				class:selected={i === selectedIndex}
+				on:click={() => selectCommand(command.id)}
+				on:mouseenter={() => selectedIndex = i}
+			>
+				<span class="command-icon">{command.icon}</span>
+				<div class="command-text">
+					<div class="command-label">{command.label}</div>
+					<div class="command-description">{command.description}</div>
+				</div>
+			</button>
+		{/each}
+		{#if filteredCommands.length === 0}
+			<div class="no-results">No commands found</div>
+		{/if}
+	</div>
+</div>
 
 <style>
 	.command-palette {
-		position: absolute;
-		bottom: 100%;
-		left: 0;
-		margin-bottom: 0.5rem;
 		background: #2a2a2a;
+		border-radius: 12px;
+		overflow: hidden;
+		min-width: 400px;
+		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 		border: 1px solid #3a3a3a;
-		border-radius: 6px;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-		z-index: 1000;
-		min-width: 200px;
+	}
+
+	.palette-header {
+		padding: 0.5rem;
+		background: #1a1a1a;
+		border-bottom: 1px solid #3a3a3a;
+	}
+
+	.search-input {
+		width: 100%;
+		padding: 0.75rem 1rem;
+		background: transparent;
+		border: none;
+		outline: none;
+		color: #fff;
+		font-size: 1rem;
+		font-family: inherit;
 	}
 
 	.command-list {
-		padding: 0.25rem;
+		padding: 0.5rem;
+		max-height: 400px;
+		overflow-y: auto;
 	}
 
 	.command-item {
@@ -82,22 +141,34 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		padding: 0.75rem;
+		padding: 0.75rem 1rem;
 		background: transparent;
 		border: none;
-		border-radius: 4px;
+		border-radius: 8px;
 		cursor: pointer;
 		text-align: left;
 		color: #ccc;
-		transition: background 0.2s;
+		transition: all 0.2s;
 	}
 
-	.command-item:hover {
-		background: #3a3a3a;
+	.command-item.selected {
+		background: #4a9eff;
+		color: #fff;
+	}
+
+	.command-item.selected .command-label {
+		color: #fff;
+	}
+
+	.command-item.selected .command-description {
+		color: rgba(255, 255, 255, 0.8);
 	}
 
 	.command-icon {
-		font-size: 1.25rem;
+		font-size: 1.5rem;
+		min-width: 2rem;
+		display: flex;
+		justify-content: center;
 	}
 
 	.command-text {
@@ -105,7 +176,7 @@
 	}
 
 	.command-label {
-		font-weight: 500;
+		font-weight: 600;
 		color: #fff;
 		margin-bottom: 0.15rem;
 	}
@@ -113,5 +184,12 @@
 	.command-description {
 		font-size: 0.85rem;
 		color: #999;
+	}
+
+	.no-results {
+		padding: 2rem;
+		text-align: center;
+		color: #666;
+		font-style: italic;
 	}
 </style>

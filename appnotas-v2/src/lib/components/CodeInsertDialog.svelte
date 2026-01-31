@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import { codeInsertRequested } from '$lib/stores/shortcuts';
 
 	let isOpen = false;
@@ -18,12 +19,27 @@
 		'sql'
 	];
 
-	// Listen for code insert requests
+	// Listen for code insert requests from store
 	$: if ($codeInsertRequested) {
 		open();
 	}
 
+	// Listen for openCodeDialog custom event
+	function handleOpenCodeDialog() {
+		console.log('CodeInsertDialog: openCodeDialog event received');
+		open();
+	}
+
+	onMount(() => {
+		window.addEventListener('openCodeDialog', handleOpenCodeDialog);
+	});
+
+	onDestroy(() => {
+		window.removeEventListener('openCodeDialog', handleOpenCodeDialog);
+	});
+
 	export function open() {
+		console.log('CodeInsertDialog: Opening dialog');
 		isOpen = true;
 		code = '';
 		language = 'javascript';

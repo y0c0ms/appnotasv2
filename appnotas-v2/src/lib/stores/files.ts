@@ -5,6 +5,7 @@ export interface OpenFile {
     content: string;
     modified: boolean;
     language: string;
+    type?: 'text' | 'pdf';
 }
 
 export const openFiles = writable<OpenFile[]>([]);

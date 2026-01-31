@@ -7,6 +7,11 @@
   ],
   "permissions": [
     "core:default",
+    "core:event:default",
+    "core:app:default",
+    "fs:allow-read",
+    "fs:allow-write",
+    "fs:allow-exists",
     "dialog:allow-open",
     "dialog:default"
   ]

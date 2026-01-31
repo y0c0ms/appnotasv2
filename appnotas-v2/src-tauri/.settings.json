@@ -1,0 +1,17 @@
+{
+  "showEditorMenus": true,
+  "customColors": {
+    "ctrl1": "#ff4a4a",
+    "ctrl2": "#4a9eff",
+    "ctrl3": "#4aff4a"
+  },
+  "keybinds": {
+    "toggleMenus": "Control+k",
+    "openSettings": "Control+,",
+    "newNote": "Control+n",
+    "search": "Control+f"
+  },
+  "geminiKey": "",
+  "notesDirectory": "C:\\Users\\Utilizador\\Documents\\notes",
+  "lastActiveNoteId": "note-20260130-231315-note-jan-30-1113-pm.md"
+}

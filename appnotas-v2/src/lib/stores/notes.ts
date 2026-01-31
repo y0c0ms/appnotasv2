@@ -1,5 +1,6 @@
 import { writable, derived } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { settingsStore } from './settings';
 
 export interface Note {
     id: string;
@@ -20,6 +21,14 @@ export const notesList = writable<Note[]>([]);
 
 // Currently active note ID
 export const activeNoteId = writable<string | null>(null);
+
+// Sync activeNoteId to settings for persistence
+activeNoteId.subscribe(id => {
+    if (id) {
+        settingsStore.update(s => ({ ...s, lastActiveNoteId: id }));
+        settingsStore.save();
+    }
+});
 
 // Derived: Get the active note object
 export const activeNote = derived(

@@ -168,8 +168,27 @@ pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let file_path = entry.path();
 
-        if file_path.extension().and_then(|s| s.to_str()) == Some("md") {
-            let content = fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+        // Skip directories
+        if file_path.is_dir() {
+            continue;
+        }
+
+        // Case-insensitive extension check
+        let is_md = file_path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_lowercase() == "md")
+            .unwrap_or(false);
+
+        if is_md {
+            // Be resilient: skip files that fail to read instead of failing the whole thing
+            let content = match fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to read note file {:?}: {}", file_path, e);
+                    continue;
+                }
+            };
+
             let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
             
             let note = if let Some((frontmatter, body)) = parse_frontmatter(&content) {
@@ -195,7 +214,7 @@ pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
                 Note {
                     id: filename.clone(),
                     title,
-                    content,
+                    content: content.clone(),
                     path: Some(file_path.to_str().unwrap().to_string()),
                     created_at: now.clone(),
                     updated_at: now,

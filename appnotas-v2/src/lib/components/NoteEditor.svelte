@@ -1,9 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { EditorView, basicSetup } from 'codemirror';
-	import { EditorState } from '@codemirror/state';
-	import { markdown } from '@codemirror/lang-markdown';
-	import { oneDark } from '@codemirror/theme-one-dark';
+	import { onMount } from 'svelte';
 	import { activeNote, notesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
 	import {
 		colorChangeRequested,
@@ -12,349 +8,307 @@
 		listModeToggleRequested
 	} from '$lib/stores/shortcuts';
 	import { openFiles, activeFile } from '$lib/stores/files';
-	import { invoke } from '@tauri-apps/api/core';
+	import { settingsStore } from '$lib/stores/settings';
+	import { focusArea } from '$lib/stores/focus';
+	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
-	import { richNoteDecorations, richNoteTheme } from '$lib/utils/rich-note-decorations';
+	import TipTapEditor from './TipTapEditor.svelte';
 	import CodeInsertDialog from './CodeInsertDialog.svelte';
 	import CommandPalette from './CommandPalette.svelte';
 
 	let title = $activeNote?.title || '';
-	let editorContainer: HTMLElement;
-	let editorView: EditorView | null = null;
+	export let handleFileClick: (path: string) => void = () => {};
+	let editor: any;
 	let saveTimeout: ReturnType<typeof setTimeout>;
 	let showCommandPalette = false;
-	let commandPalettePos = { x: 0, y: 0 };
+
+	onMount(() => {
+		settingsStore.init();
+
+		const handleGlobalToggle = () => {
+			settingsStore.toggleMenus();
+		};
+		window.addEventListener('toggle-editor-menus', handleGlobalToggle);
+		
+		return () => {
+			window.removeEventListener('toggle-editor-menus', handleGlobalToggle);
+		};
+	});
 
 	// Listen for color change requests
 	$: if ($colorChangeRequested && $activeNote) {
-		setNoteColor($activeNote.id, $colorChangeRequested);
-		console.log('Note color changed to:', $colorChangeRequested);
-	}
-
-	// Listen for checklist mode toggle
-	$: if ($listModeToggleRequested && editorView) {
-		toggleChecklistMode();
+		const color = $colorChangeRequested;
+		const colorMap: Record<string, string> = {
+			'red': $settingsStore.customColors.ctrl1,
+			'yellow': $settingsStore.customColors.ctrl2,
+			'green': $settingsStore.customColors.ctrl3,
+			'blue': '#4a9eff',
+			'default': 'inherit'
+		};
+		setNoteColor($activeNote.id, colorMap[color] || color);
 	}
 
 	// Get color class
 	$: colorClass = $activeNote?.color || 'default';
 
-	// Handle file mention clicks
-	function handleFileClick(filepath: string) {
-		console.log('Opening file from mention:', filepath);
-		invoke<string>('read_file', { path: filepath })
-			.then((content) => {
-				const ext = filepath.split('.').pop() || 'text';
-				const languageMap: Record<string, string> = {
-					js: 'javascript',
-					ts: 'typescript',
-					py: 'python',
-					rs: 'rust',
-					md: 'markdown',
-					json: 'json',
-					html: 'html',
-					css: 'css'
-				};
-				const language = languageMap[ext] || 'text';
-
-				openFiles.update((files) => {
-					if (files.some((f) => f.path === filepath)) {
-						activeFile.set(files.find((f) => f.path === filepath)!);
-						return files;
-					}
-
-					const newFile = {
-						path: filepath,
-						content,
-						language,
-						modified: false
-					};
-
-					activeFile.set(newFile);
-					return [...files, newFile];
-				});
-			})
-			.catch((error) => {
-				console.error('Failed to open file mention:', error);
-			});
+	// Update title when active note changes
+	$: if ($activeNote) {
+		title = $activeNote.title;
 	}
 
-	// Toggle checklist mode - add [ ] to lines
-	function toggleChecklistMode() {
-		if (!editorView) return;
+	// Watch for list mode toggle from store
+	$: if ($listModeToggleRequested) {
+		handleCommand('tasks');
+	}
 
-		const state = editorView.state;
-		const selection = state.selection.main;
-		const line = state.doc.lineAt(selection.from);
-		const lineText = line.text;
-
-		// Check if line already has checkbox
-		if (lineText.trim().startsWith('[ ]') || lineText.trim().startsWith('[x]')) {
-			// Remove checkbox
-			const newText = lineText.replace(/^\s*\[[x ]\]\s*/, '');
-			editorView.dispatch({
-				changes: { from: line.from, to: line.to, insert: newText }
-			});
-		} else {
-			// Add checkbox
-			const indent = lineText.match(/^\s*/)?.[0] || '';
-			const newText = indent + '[ ] ' + lineText.trim();
-			editorView.dispatch({
-				changes: { from: line.from, to: line.to, insert: newText }
-			});
+	// Auto-focus editor when focusArea switches to 'editor'
+	$: if ($focusArea === 'editor' && editor) {
+		const tiptap = editor.getEditor();
+		if (tiptap && !tiptap.isFocused) {
+			tiptap.commands.focus();
 		}
 	}
 
-	// Handle @file command
-	async function handleFileCommand(pos: number) {
-		try {
-			const selected = await openFileDialog({
-				directory: false,
-				multiple: false,
-				title: 'Choose File to Link'
-			});
-
-			if (selected && typeof selected === 'string' && editorView) {
-				const filename = selected.split(/[/\\]/).pop() || selected;
-				const fileLink = `[${filename}](file:///${selected.replace(/\\/g, '/')})`;
-
-				editorView.dispatch({
-					changes: { from: pos - 5, to: pos, insert: fileLink }
-				});
-			}
-		} catch (e) {
-			console.error('Failed to select file:', e);
-		}
+	// Handle title change
+	function handleTitleChange() {
+		if ($activeNote && title !== $activeNote.title) {
+			saveNote();		}
 	}
 
-	// Handle code block updates
-	function handleCodeUpdate(from: number, to: number, newCode: string) {
-		if (!editorView) return;
-
-		const doc = editorView.state.doc.toString();
-		const match = doc.substring(from, to).match(/```(\w+)\n[\s\S]*?```/);
-		if (!match) return;
-
-		const lang = match[1];
-		const newBlock = `\`\`\`${lang}\n${newCode}\n\`\`\``;
-
-		editorView.dispatch({
-			changes: { from, to, insert: newBlock }
-		});
-	}
-
-	// Handle code block deletion
-	function handleCodeDelete(from: number, to: number) {
-		if (!editorView) return;
-
-		editorView.dispatch({
-			changes: { from, to, insert: '' }
-		});
-	}
-
-	// Handle checkbox toggle
-	function handleCheckboxToggle(pos: number) {
-		if (!editorView) return;
-
-		const doc = editorView.state.doc.toString();
-		const checkbox = doc.substring(pos, pos + 3);
-
-		const newCheckbox = checkbox.includes('x') ? '[ ]' : '[x]';
-
-		editorView.dispatch({
-			changes: { from: pos, to: pos + 3, insert: newCheckbox }
-		});
-	}
-
-	// Auto-save after 1 second of no typing
+	// Schedule auto-save
 	function scheduleSave() {
 		clearTimeout(saveTimeout);
-		saveTimeout = setTimeout(async () => {
-			if ($activeNote && editorView) {
-				const content = editorView.state.doc.toString();
-
-				if ($activeNote.path) {
-					try {
-						await saveNoteToFile($activeNote.id, content);
-						console.log('File-based note auto-saved:', $activeNote.id);
-					} catch (e) {
-						console.error('Failed to save file-based note:', e);
-					}
-				} else {
-					const updatedNote = {
-						...$activeNote,
-						title,
-						content,
-						updated_at: new Date().toISOString()
-					};
-
-					try {
-						await invoke('save_note', { note: updatedNote });
-						console.log('In-memory note auto-saved:', updatedNote.id);
-
-						notesList.update((notes) =>
-							notes.map((n) => (n.id === updatedNote.id ? updatedNote : n))
-						);
-					} catch (e) {
-						console.error('Failed to save note:', e);
-					}
-				}
-			}
+		saveTimeout = setTimeout(() => {
+			saveNote();
 		}, 1000);
 	}
 
-	// Create CodeMirror editor
-	function createEditor(container: HTMLElement, initialContent: string) {
-		const state = EditorState.create({
-			doc: initialContent,
-			extensions: [
-				// Custom extensions instead of basicSetup to avoid line numbers
-				EditorView.lineWrapping,
-				markdown(),
-				oneDark,
-				richNoteDecorations(
-					handleCodeUpdate,
-					handleCodeDelete,
-					handleCheckboxToggle,
-					handleFileClick
-				),
-				richNoteTheme,
-				EditorView.updateListener.of((update) => {
-					if (update.docChanged) {
-						scheduleSave();
+	// Save note
+	async function saveNote() {
+		if (!$activeNote) return;
 
-						// Check for @ command trigger
-						const changes = update.changes;
-						changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
-							const insertedText = inserted.toString();
+		const updatedNote = {
+			...$activeNote,
+			title,
+			lastModified: new Date()
+		};
 
-							// Check if we just typed @
-							if (insertedText === '@') {
-								console.log('@ detected - showing command palette');
-								showCommandPalette = true;
-								// Don't auto-trigger codeInsertRequested here
-								// Command palette will handle showing options
-							}
-						});
+		try {
+			await saveNoteToFile(updatedNote.id, updatedNote.content);
+			console.log('File-based note auto-saved:', updatedNote.filename || updatedNote.title);
+
+			notesList.update((notes) =>
+				notes.map((n) => (n.id === updatedNote.id ? updatedNote : n))
+			);
+		} catch (e) {
+			console.error('Failed to save note:', e);
+		}
+	}
+
+	// Handle content update from TipTap
+	function handleContentUpdate(markdown: string) {
+		if ($activeNote) {
+			notesList.update(notes =>
+				notes.map(n => n.id === $activeNote!.id ? { ...n, content: markdown } : n)
+			);
+			scheduleSave();
+		}
+	}
+
+	// Handle code insert
+	async function handleCodeInsert() {
+		console.log('NoteEditor: triggering code insert dialog');
+		// Open code dialog
+		window.dispatchEvent(new CustomEvent('openCodeDialog'));
+	}
+
+	// Handle file link
+	async function handleFileLink() {
+		console.log('NoteEditor: triggering file link dialog');
+		try {
+			const result = await openFileDialog({
+				multiple: false,
+				directory: false
+			});
+
+			if (result && editor) {
+				const filepath = result as string;
+				const filename = filepath.split(/[\\/]/).pop() || 'file';
+				
+				// Insert link into editor as a widget node
+				const tiptapEditor = editor.getEditor();
+				if (tiptapEditor) {
+					tiptapEditor
+						.chain()
+						.focus()
+						.setFileLink({ path: filepath, name: filename })
+						.run();
+				}
+			}
+		} catch (error) {
+			console.error('Failed to select file:', error);
+		}
+	}
+
+	// Unified command executor
+	async function handleCommand(command: string) {
+		const tiptapEditor = editor?.getEditor();
+		if (!tiptapEditor) return;
+
+		switch (command) {
+			case 'tasks':
+				tiptapEditor.chain().focus().toggleTaskList().run();
+				break;
+			case 'image':
+				try {
+					const result = await openFileDialog({
+						multiple: false,
+						directory: false,
+						filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+					});
+					if (result) {
+						tiptapEditor.chain().focus().setImage({ src: convertFileSrc(result as string) }).run();
 					}
-				}),
-				EditorView.theme({
-					'&': {
-						height: '100%',
-						fontSize: '1rem',
-						backgroundColor: 'transparent'
-					},
-					'.cm-scroller': {
-						fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif',
-						lineHeight: '1.8',
-						padding: '1rem'
-					},
-					'.cm-content': {
-						caretColor: '#4a9eff'
-					},
-					'.cm-gutters': {
-						display: 'none' // Hide line numbers
-					}
-				})
-			]
-		});
-
-		editorView = new EditorView({
-			state,
-			parent: container
-		});
-
-		return editorView;
+				} catch (e) { console.error('Image upload failed:', e); }
+				break;
+			case 'drawing':
+				tiptapEditor.chain().focus().insertContent({ type: 'drawing' }).run();
+				break;
+			case 'style':
+				settingsStore.toggleMenus();
+				break;
+			case 'color':
+				if (args[0]) {
+					tiptapEditor.chain().focus().setMark('textStyle', { color: args[0] }).run();
+				}
+				break;
+			case 'file':
+				handleFileLink();
+				break;
+			case 'code':
+				handleCodeInsert();
+				break;
+		}
 	}
 
 	// Listen for code block insert from dialog
 	function handleCodeBlockInsert(event: CustomEvent) {
-		if (!editorView) return;
-
 		const { codeBlock } = event.detail;
-		const state = editorView.state;
-		const pos = state.selection.main.head;
-
-		// Find and remove @code text
-		const doc = state.doc.toString();
-		const beforePos = doc.substring(0, pos);
-		const codeIndex = beforePos.lastIndexOf('@code');
-
-		if (codeIndex !== -1) {
-			editorView.dispatch({
-				changes: [
-					{ from: codeIndex, to: pos, insert: '' },
-					{ from: codeIndex, insert: codeBlock + '\n' }
-				]
-			});
-		} else {
-			// Just insert at cursor
-			editorView.dispatch({
-				changes: { from: pos, insert: codeBlock + '\n' }
-			});
+		const tiptapEditor = editor?.getEditor();
+		
+		if (tiptapEditor) {
+			tiptapEditor
+				.chain()
+				.focus()
+				.insertContent(codeBlock + '\n')
+				.run();
 		}
 	}
 
-	// Reinitialize editor when note changes
-	$: if ($activeNote && editorContainer) {
-		title = $activeNote.title;
 
-		// Destroy old editor
-		if (editorView) {
-			editorView.destroy();
-		}
+	// Handle file mention clicks
+	// This function is now exported and can be passed from parent
+	// async function handleFileClick(filepath: string) {
+	// 	const existing = $openFiles.find(f => f.path === filepath);
+	// 	if (existing) {
+	// 		activeFile.set(existing);
+	// 		return;
+	// 	}
 
-		// Create new editor with note content
-		createEditor(editorContainer, $activeNote.content);
-	}
+	// 	const ext = filepath.split('.').pop()?.toLowerCase() || '';
+		
+	// 	// Special handling for PDFs (binary files)
+	// 	if (ext === 'pdf') {
+	// 		const assetUrl = convertFileSrc(filepath);
+	// 		const newFile = { 
+	// 			name: filepath.split(/[\\/]/).pop() || 'file.pdf', 
+	// 			path: filepath, 
+	// 			content: assetUrl, 
+	// 			language: 'pdf', 
+	// 			modified: false,
+	// 			type: 'pdf' as const
+	// 		};
+			
+	// 		openFiles.update(files => [...files, newFile]);
+	// 		activeFile.set(newFile);
+	// 		return;
+	// 	}
+
+	// 	try {
+	// 		const content = await invoke<string>('read_file', { path: filepath });
+	// 		const langMap: Record<string, string> = { js:'javascript', ts:'typescript', py:'python', rs:'rust', html:'html', css:'css', json:'json', md:'markdown' };
+			
+	// 		const newFile = { 
+	// 			name: filepath.split(/[\\/]/).pop() || 'file', 
+	// 			path: filepath, 
+	// 			content: content || '', 
+	// 			language: langMap[ext] || 'text', 
+	// 			modified: false 
+	// 		};
+			
+	// 		openFiles.update(files => [...files, newFile]);
+	// 		activeFile.set(newFile);
+	// 	} catch (err) {
+	// 		console.error('Failed to open file from link:', err);
+	// 	}
+	// }
+
 
 	onMount(() => {
-		if ($activeNote && editorContainer) {
-			createEditor(editorContainer, $activeNote.content);
-		}
-
 		// Listen for code block insert events
 		window.addEventListener('insertCodeBlock', handleCodeBlockInsert as EventListener);
 
-		// Listen for dialog open events from command palette
-		window.addEventListener('openCodeDialog', () => {
-			// CodeInsertDialog will open automatically via its store
-		});
-
-		window.addEventListener('openFileDialog', async () => {
-			if (editorView) {
-				const pos = editorView.state.selection.main.head;
-				await handleFileCommand(pos);
-			}
-		});
-
 		return () => {
 			window.removeEventListener('insertCodeBlock', handleCodeBlockInsert as EventListener);
-			window.removeEventListener('openCodeDialog', () => {});
-			window.removeEventListener('openFileDialog', () => {});
+			clearTimeout(saveTimeout);
 		};
-	});
-
-	onDestroy(() => {
-		if (editorView) {
-			editorView.destroy();
-		}
 	});
 </script>
 
 <CodeInsertDialog />
-<CommandPalette />
 
-<div class="note-editor color-{colorClass}">
+{#if showCommandPalette}
+	<div class="command-palette-wrapper" on:click|self={() => (showCommandPalette = false)} role="dialog">
+		<CommandPalette
+			on:openCodeDialog={() => {
+				showCommandPalette = false;
+				handleCodeInsert();
+			}}
+			on:openFileDialog={() => {
+				showCommandPalette = false;
+				handleFileLink();
+			}}
+			on:openDialog={(e) => {
+				showCommandPalette = false;
+				handleCommand(e.detail.id);
+			}}
+			on:close={() => (showCommandPalette = false)}
+		/>
+	</div>
+{/if}
+
+<div class="note-editor color-{colorClass}" class:focused={$focusArea === 'editor'}>
 	<input
 		class="note-title"
 		bind:value={title}
+		on:blur={handleTitleChange}
 		on:input={scheduleSave}
 		placeholder="Note title..."
 	/>
 
 	<div class="editor-wrapper">
-		<div class="editor-container" bind:this={editorContainer}></div>
+		{#if $activeNote}
+			{#key $activeNote.id}
+				<TipTapEditor
+					bind:this={editor}
+					content={$activeNote.content}
+					onUpdate={handleContentUpdate}
+					onCommandTrigger={() => (showCommandPalette = true)}
+					onFileClick={handleFileClick}
+					placeholder="Start writing... Type @ for commands"
+				/>
+			{/key}
+		{/if}
 	</div>
 
 	<div class="note-hints">
@@ -363,7 +317,6 @@
 			{#if $activeNote?.color}• {$activeNote.color}{/if}
 			• Type @ for commands • Ctrl+L for checklists
 		</span>
-		<span>{editorView?.state.doc.length || 0} characters</span>
 	</div>
 </div>
 
@@ -372,66 +325,90 @@
 		flex: 1;
 		display: flex;
 		flex-direction: column;
-		padding: 2rem;
+		height: 100%;
 		overflow: hidden;
-		background: #1a1a1a;
-		transition: background-color 0.3s ease;
+		transition: outline 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 	}
 
-	/* Color themes */
-	.note-editor.color-red {
-		background: linear-gradient(135deg, #1a1212 0%, #2a1515 100%);
-	}
-
-	.note-editor.color-yellow {
-		background: linear-gradient(135deg, #1a1810 0%, #2a2418 100%);
-	}
-
-	.note-editor.color-green {
-		background: linear-gradient(135deg, #101a12 0%, #152a18 100%);
-	}
-
-	.note-editor.color-blue {
-		background: linear-gradient(135deg, #101418 0%, #15202a 100%);
+	.note-editor.focused {
+		outline: 2px solid #4a9eff;
+		outline-offset: -2px;
 	}
 
 	.note-title {
 		width: 100%;
-		padding: 0.5rem;
-		font-size: 1.5rem;
+		padding: 1rem 1.5rem;
+		font-size: 1.75rem;
 		font-weight: 600;
-		background: transparent;
 		border: none;
-		border-bottom: 2px solid transparent;
+		background: transparent;
 		color: #fff;
-		margin-bottom: 1rem;
-		transition: border-color 0.2s;
+		outline: none;
+		border-bottom: 1px solid #2a2a2a;
 	}
 
-	.note-title:focus {
-		outline: none;
-		border-bottom-color: #4a9eff;
+	.note-title::placeholder {
+		color: #666;
 	}
 
 	.editor-wrapper {
 		flex: 1;
-		position: relative;
-		overflow: hidden;
-	}
-
-	.editor-container {
-		height: 100%;
-		border: 1px solid #2a2a2a;
-		border-radius: 4px;
-		overflow: hidden;
+		overflow: auto;
+		background: #0d1117;
 	}
 
 	.note-hints {
+		padding: 0.75rem 1.5rem;
 		display: flex;
 		justify-content: space-between;
-		margin-top: 0.5rem;
-		padding: 0.5rem;
-		font-size: 0.75rem;
-		color: #666;
+		align-items: center;
+		background: #0d1117;
+		border-top: 1px solid #1a1a1a;
+		font-size: 0.875rem;
+		color: #6b7280;
+	}
+
+	.note-hints span {
+		color: #777;
+		font-size: 0.875rem;
+	}
+
+	.command-palette-wrapper {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		z-index: 9999;
+		background: #2a2a2a;
+		border: 1px solid #3a3a3a;
+		border-radius: 8px;
+		padding: 1rem;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+		min-width: 300px;
+	}
+
+	/* Color variants */
+	.color-red {
+		border-left: 4px solid #ef4444;
+	}
+
+	.color-blue {
+		border-left: 4px solid #3b82f6;
+	}
+
+	.color-green {
+		border-left: 4px solid #10b981;
+	}
+
+	.color-yellow {
+		border-left: 4px solid #f59e0b;
+	}
+
+	.color-purple {
+		border-left: 4px solid #8b5cf6;
+	}
+
+	.color-pink {
+		border-left: 4px solid #ec4899;
 	}
 </style>

@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { invoke } from '@tauri-apps/api/core';
+	import { onMount, tick } from 'svelte';
+	import { get } from 'svelte/store';
+	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
-	import { 
-		notesList, 
-		activeNoteId, 
+	import {
+		notesList,
+		activeNoteId,
 		activeNote,
 		notesDirectory,
 		initNotes,
@@ -13,8 +14,10 @@
 		saveNoteToFile,
 		deleteNoteFile
 	} from '$lib/stores/notes';
-	import { openFiles, activeFile } from '$lib/stores/files';
-	import { commandPaletteOpen, setupGlobalShortcuts } from '$lib/stores/shortcuts';
+	import { openFiles, activeFile, currentDirectory } from '$lib/stores/files';
+	import { commandPaletteOpen, setupGlobalShortcuts, settingsOpen, activeTab } from '$lib/stores/shortcuts';
+	import { focusArea } from '$lib/stores/focus';
+	import { settingsStore } from '$lib/stores/settings';
 	import type { Note } from '$lib/stores/notes';
 	import type { OpenFile } from '$lib/stores/files';
 
@@ -22,9 +25,61 @@
 	import FileEditor from '$lib/components/FileEditor.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import NoteEditor from '$lib/components/NoteEditor.svelte';
+	import PDFView from '$lib/components/PDFView.svelte';
+	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+	import { detectLanguage } from '$lib/utils/files';
 
 	let loading = true;
 	let error = '';
+	let focusedTabIndex = -1;
+	let tabsContainer: HTMLElement;
+
+	// Sync focusedTabIndex with activeFile ONLY when not explicitly navigating the toolbar
+	$: if ($openFiles.length > 0) {
+		if ($focusArea !== 'file-tabs') {
+			const idx = $activeFile ? $openFiles.findIndex(f => f.path === $activeFile.path) : -1;
+			if (idx !== -1) {
+				focusedTabIndex = idx;
+			} else if (focusedTabIndex >= $openFiles.length) {
+				focusedTabIndex = $openFiles.length - 1;
+			} else if (focusedTabIndex === -1) {
+				focusedTabIndex = 0;
+			}
+		}
+	} else {
+		focusedTabIndex = -1;
+	}
+
+	// Auto-focus toolbar when focusArea switches to 'file-tabs'
+	$: if ($focusArea === 'file-tabs' && tabsContainer) {
+		// One-time sync when entering the area
+		const idx = $activeFile ? $openFiles.findIndex(f => f.path === $activeFile.path) : -1;
+		if (idx !== -1) focusedTabIndex = idx;
+		
+		tick().then(() => {
+			if (document.activeElement !== tabsContainer) {
+				tabsContainer.focus();
+			}
+		});
+	}
+
+	function handleToolbarKeyDown(e: KeyboardEvent) {
+		if ($focusArea !== 'file-tabs') return;
+
+		if (e.key === 'ArrowRight') {
+			e.preventDefault();
+			focusedTabIndex = (focusedTabIndex + 1) % $openFiles.length;
+		} else if (e.key === 'ArrowLeft') {
+			e.preventDefault();
+			focusedTabIndex = (focusedTabIndex - 1 + $openFiles.length) % $openFiles.length;
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			const file = $openFiles[focusedTabIndex];
+			if (file) {
+				activeFile.set(file);
+			}
+		}
+	}
 
 	// Command palette commands
 	const commands = [
@@ -102,7 +157,7 @@
 				})}`;
 				const note = await createNoteFile(title);
 				console.log('File-based note created:', note.id);
-				activeFile.set(null); // Show the note editor
+				// activeFile.set(null); // No need to manually clear if switching tab or logic handles it
 			} catch (e) {
 				console.error('Failed to create file-based note:', e);
 				error = String(e);
@@ -124,7 +179,6 @@
 				
 				notesList.update((n) => [newNote, ...n]);
 				activeNoteId.set(newNote.id);
-				activeFile.set(null);
 			} catch (e) {
 				console.error('Failed to create note:', e);
 			}
@@ -140,22 +194,83 @@
 	onMount(async () => {
 		console.log('🚀 App mounted, setting up shortcuts...');
 		setupGlobalShortcuts();
-		console.log('✅ Shortcuts initialized');
+		await settingsStore.init();
+		console.log('✅ Shortcuts initialized and settings loaded');
 
-		try {
-			// Load initial in-memory notes (backward compat)
-			const initialNotes = await invoke<Note[]>('list_notes');
-			notesList.set(initialNotes);
-			if (initialNotes.length > 0) {
-				activeNoteId.set(initialNotes[0].id);
+		const dir = get(settingsStore).notesDirectory;
+		if (dir) {
+			console.log('📂 Loading saved notes directory:', dir);
+			try {
+				await setNotesDirectory(dir);
+			} catch (e) {
+				console.error('Failed to load saved notes directory:', e);
 			}
-		} catch (e) {
-			error = String(e);
-			console.error('Failed to load notes:', e);
-		} finally {
-			loading = false;
 		}
+
+		const handleDirChange = async (e: any) => {
+			const newDir = e.detail;
+			if (newDir) {
+				await setNotesDirectory(newDir);
+			}
+		};
+		window.addEventListener('notes-directory-changed', handleDirChange);
+
+		// Restore last active note if available
+		const lastNoteId = get(settingsStore).lastActiveNoteId;
+		if (lastNoteId) {
+			console.log('🔄 Restoring last active note:', lastNoteId);
+			activeNoteId.set(lastNoteId);
+		}
+
+		loading = false;
+
+		return () => {
+			window.removeEventListener('notes-directory-changed', handleDirChange);
+		};
 	});
+
+	async function handleFileClick(path: string) {
+		console.log('🔗 File link clicked in note:', path);
+		try {
+			// 1. Switch sidebar to "Files"
+			activeTab.set('files');
+
+			// 2. Set the current directory to the folder containing the file
+			const lastSlash = path.lastIndexOf('\\');
+			if (lastSlash !== -1) {
+				const parentDir = path.substring(0, lastSlash);
+				console.log('📂 Navigating to parent directory:', parentDir);
+				currentDirectory.set(parentDir);
+			}
+
+			// 3. Open the file
+			const fileName = path.split(/[\\/]/).pop() || 'Untitled';
+			const type = fileName.toLowerCase().endsWith('.pdf') ? 'pdf' : 'markdown';
+			
+			let content = '';
+			if (type === 'pdf') {
+				content = convertFileSrc(path);
+			} else {
+				content = await invoke<string>('read_file', { path });
+			}
+			
+			const newFile: OpenFile = {
+				path,
+				content,
+				modified: false,
+				language: detectLanguage(fileName),
+				type
+			};
+
+			openFiles.update((files) => {
+				if (files.some((f) => f.path === path)) return files;
+				return [...files, newFile];
+			});
+			activeFile.set(newFile);
+		} catch (e) {
+			console.error('Failed to open linked file:', e);
+		}
+	}
 
 	async function handleSave(file: OpenFile, newContent: string) {
 		try {
@@ -169,128 +284,166 @@
 		}
 	}
 
-	function closeFile(file: OpenFile) {
-		openFiles.update((files) => files.filter((f) => f.path !== file.path));
-		if ($activeFile?.path === file.path) {
-			activeFile.set($openFiles[0] || null);
+	function closeFile(path: string) {
+		openFiles.update((files) => files.filter((f) => f.path !== path));
+		if ($activeFile?.path === path) {
+			activeFile.set(get(openFiles)[0] || null);
 		}
 	}
 </script>
 
-<CommandPalette bind:isOpen={$commandPaletteOpen} {commands} />
 
 <div class="app">
 	<Sidebar />
 
-	<div class="main">
-		<header>
-			<h1>AppNotas v2</h1>
-			<div class="header-actions">
-				<button class="btn-primary" on:click={createNewNote}>
-					📝 New Note
-				</button>
-				<button class="btn-secondary" on:click={chooseNotesDirectory}>
-					📁 Choose Directory
-				</button>
-				{#if $notesDirectory}
-					<span class="notes-dir-badge" title={$notesDirectory}>
-						📂 {$notesDirectory.split(/[/\\]/).pop()}
-					</span>
-				{/if}
-			</div>
-		</header>
+	<div class="main-grid" class:show-settings={$settingsOpen}>
+		<div class="editor-section">
+			<header>
+				<h1>AppNotas v2</h1>
+				<div class="header-actions">
+					<button class="btn-icon" on:click={() => settingsOpen.update(v => !v)} title="Settings (Ctrl+,)">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="12" cy="12" r="3"></circle>
+							<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+						</svg>
+					</button>
+					<button class="btn-primary" on:click={createNewNote}>
+						📝 New Note
+					</button>
+				</div>
+			</header>
 
-		<div class="content-area">
 			{#if loading}
-				<div class="loading">Loading...</div>
+				<div class="loading">Loading notes...</div>
 			{:else if error}
-				<div class="error">Error: {error}</div>
+				<div class="error">{error}</div>
 			{:else}
-				{@const shouldShowTabs = $activeFile && $openFiles.length > 0}
-				{@const _ = shouldShowTabs ? null : console.warn('⚠️ TAB BAR HIDDEN:', {
-					hasActiveFile: !!$activeFile,
-					openFilesCount: $openFiles.length,
-					openFiles: $openFiles.map(f => f.path)
-				})}
-				
-				<!-- File Tabs - Always show if there's an active file -->
-				{#if shouldShowTabs}
-					<div class="tabs">
-						{#each $openFiles as file}
-							<div class="tab" class:active={$activeFile?.path === file.path}>
-								<button
-									class="tab-button"
-									on:click={() => {
-										console.log('🔄 TAB CLICK:', {
-											from: $activeFile?.path,
-											to: file.path,
-											contentPreview: file.content.substring(0, 50)
-										});
-										activeFile.set(file);
-									}}
+				{#if $activeTab === 'files' && $openFiles.length > 0}
+					<div 
+						class="content-tabs" 
+						class:focused={$focusArea === 'file-tabs'}
+						on:keydown={handleToolbarKeyDown}
+						tabindex="0"
+						bind:this={tabsContainer}
+					>
+						<div class="tabs-scroll">
+							{#each $openFiles as file, i}
+								<div 
+									class="tab-wrapper" 
+									class:highlighted={i === focusedTabIndex}
 								>
-									{file.path.split('\\').pop()}
-									{#if file.modified}
-										<span class="modified">●</span>
-									{/if}
-								</button>
-								<button class="close-button" on:click={() => closeFile(file)}>×</button>
-							</div>
-						{/each}
+									<button
+										class="tab"
+										class:active={$activeFile?.path === file.path}
+										on:click={() => {
+											focusedTabIndex = i;
+											activeNoteId.set(null);
+											activeFile.set(file);
+										}}
+									>
+										{file.path.split(/[\\/]/).pop()}
+										{#if file.modified}
+											<span class="modified">●</span>
+										{/if}
+									</button>
+									<button class="close-button" on:click|stopPropagation={() => closeFile(file.path)}>
+										✕
+									</button>
+								</div>
+							{/each}
+						</div>
 					</div>
 				{/if}
 
-				<!-- Content Area -->
-				{#if $activeFile}
-					<!-- File Editor Mode -->
-					{#key $activeFile.path}
-						{@const currentFile = $activeFile}
-						{@const _ = console.log('🔑 KEY BLOCK RE-RENDERING:', {
-							path: currentFile.path,
-							language: currentFile.language,
-							contentLength: currentFile.content.length,
-							contentPreview: currentFile.content.substring(0, 80),
-							openFilesCount: $openFiles.length
-						})}
-						<FileEditor
-							content={currentFile.content}
-							language={currentFile.language}
-							onSave={(content) => handleSave(currentFile, content)}
-							onModified={(modified) => {
-								if (modified !== currentFile.modified) {
-									openFiles.update((files) =>
-										files.map((f) => (f.path === currentFile.path ? { ...f, modified } : f))
-									);
-								}
-							}}
-						/>
-					{/key}
-				{:else if $activeNote}
-					<!-- Note Editor Mode -->
-					<NoteEditor />
-				{:else}
-					<div class="empty-state">
-						<p>Select a note or open a file to get started</p>
-					</div>
-				{/if}
+				<div class="main-content">
+					{#if $activeTab === 'files'}
+						{#if $activeFile}
+							<!-- File Editor Mode -->
+							{#key $activeFile.path}
+								{#if $activeFile.type === 'pdf'}
+									<PDFView src={$activeFile.content} />
+								{:else}
+									<FileEditor
+										content={$activeFile.content}
+										language={$activeFile.language}
+										onSave={(content) => handleSave($activeFile, content)}
+										onModified={(modified) => {
+											if (modified !== $activeFile.modified) {
+												openFiles.update((files) =>
+													files.map((f) => (f.path === $activeFile.path ? { ...f, modified } : f))
+												);
+											}
+										}}
+									/>
+								{/if}
+							{/key}
+						{:else}
+							<div class="empty-state">
+								<div class="empty-icon">📁</div>
+								<h2>Select a file from the explorer</h2>
+								<p>Navigate the file tree to open documents</p>
+							</div>
+						{/if}
+					{:else}
+						<!-- Notes Mode (Default) -->
+						{#if $activeNote}
+							{#key $activeNote.id}
+								<NoteEditor {handleFileClick} />
+							{/key}
+						{:else}
+							<div class="empty-state">
+								<div class="empty-icon">📓</div>
+								<h2>Select a note to start writing</h2>
+								<p>Or use <kbd>Ctrl+P</kbd> for commands</p>
+							</div>
+						{/if}
+					{/if}
+				</div>
 			{/if}
 		</div>
+
+		{#if $settingsOpen}
+			<SettingsPanel />
+		{/if}
 	</div>
 </div>
 
 <style>
+	:global(body, html) {
+		overflow: hidden !important;
+		height: 100%;
+		margin: 0;
+		padding: 0;
+	}
+
 	.app {
 		display: flex;
 		height: 100vh;
 		background: #1a1a1a;
 		color: #fff;
+		overflow: hidden;
 	}
 
-	.main {
+	.main-grid {
 		flex: 1;
+		display: grid;
+		grid-template-columns: 1fr;
+		height: 100vh;
+		background-color: #0d1117;
+		transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		overflow: hidden;
+	}
+
+	.main-grid.show-settings {
+		grid-template-columns: 1fr 350px;
+	}
+
+	.editor-section {
 		display: flex;
 		flex-direction: column;
+		height: 100%;
 		overflow: hidden;
+		background: #0d1117;
 	}
 
 	header {
@@ -313,54 +466,105 @@
 		gap: 0.75rem;
 	}
 
-	.btn-primary,
-	.btn-secondary {
+	.btn-primary {
 		padding: 0.5rem 1rem;
 		border-radius: 4px;
 		border: none;
 		font-size: 0.875rem;
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.btn-primary {
 		background: #4a9eff;
 		color: white;
+		transition: all 0.2s;
 	}
 
 	.btn-primary:hover {
 		background: #3a8eef;
 	}
 
-	.btn-secondary {
-		background: #2a2a2a;
-		color: #ccc;
-		border: 1px solid #3a3a3a;
+	.content-tabs {
+		background: #1a1a1a;
+		border-bottom: 1px solid #2a2a2a;
+		height: 40px;
+		display: flex;
+		align-items: center;
+		outline: none;
+		transition: outline 0.15s ease;
 	}
 
-	.btn-secondary:hover {
-		background: #3a3a3a;
+	.content-tabs.focused {
+		outline: 2px solid #4a9eff;
+		outline-offset: -2px;
 	}
 
-	.notes-dir-badge {
-		padding: 0.5rem 0.75rem;
+	.tabs-scroll {
+		display: flex;
+		overflow-x: auto;
+		height: 100%;
+		scrollbar-width: none;
+	}
+
+	.tabs-scroll::-webkit-scrollbar {
+		display: none;
+	}
+
+	.tab-wrapper {
+		display: flex;
+		align-items: center;
+		border-right: 1px solid #2a2a2a;
+		height: 100%;
+		background: #1a1a1a;
+		transition: background 0.15s;
+	}
+
+	.tab-wrapper.highlighted {
 		background: #2a2a2a;
-		border: 1px solid #3a3a3a;
-		border-radius: 4px;
+	}
+
+	.tab {
+		padding: 0 1rem;
+		height: 100%;
+		background: transparent;
+		border: none;
+		color: #8b949e;
+		font-size: 0.85rem;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		transition: all 0.2s;
+	}
+
+	.tab:hover {
+		background: #21262d;
+		color: #c9d1d9;
+	}
+
+	.tab.active {
+		background: #0d1117;
+		color: #fff;
+		box-shadow: inset 0 2px 0 #4a9eff;
+	}
+
+	.close-button {
+		padding: 0 0.5rem;
+		background: transparent;
+		border: none;
+		color: #484f58;
+		cursor: pointer;
 		font-size: 0.75rem;
-		color: #999;
-		max-width: 200px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		transition: color 0.2s;
 	}
 
-	.content-area {
+	.close-button:hover {
+		color: #ff7b72;
+	}
+
+	.main-content {
 		flex: 1;
+		overflow: hidden;
 		display: flex;
 		flex-direction: column;
-		overflow: hidden;
 	}
 
 	.loading,
@@ -368,63 +572,53 @@
 	.empty-state {
 		flex: 1;
 		display: flex;
+		flex-direction: column;
 		align-items: center;
 		justify-content: center;
 		color: #888;
+		padding: 2rem;
 	}
 
-	.error {
-		color: #ff5555;
+	.empty-icon {
+		font-size: 4rem;
+		margin-bottom: 1.5rem;
+		opacity: 0.5;
 	}
 
-	.tabs {
-		display: flex;
-		background: #2a2a2a;
-		border-bottom: 1px solid #3a3a3a;
-		overflow-x: auto;
-		position: relative;
-		z-index: 10;
-		min-height: 45px;
+	.empty-state h2 {
+		color: #fff;
+		margin: 0 0 0.5rem 0;
 	}
 
-	.tab {
-		display: flex;
-		align-items: center;
-		background: #1a1a1a;
-		border-right: 1px solid #3a3a3a;
-	}
-
-	.tab.active {
-		background: #2a2a2a;
-	}
-
-	.tab-button {
-		padding: 0.5rem 1rem;
-		background: transparent;
-		border: none;
-		color: #ccc;
-		cursor: pointer;
-		font-size: 0.875rem;
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
+	kbd {
+		background: #21262d;
+		border: 1px solid #30363d;
+		border-radius: 6px;
+		padding: 0.2rem 0.4rem;
+		font-size: 0.8rem;
+		color: #c9d1d9;
+		font-family: inherit;
 	}
 
 	.modified {
 		color: #4a9eff;
+		font-size: 0.6rem;
 	}
 
-	.close-button {
-		padding: 0.25rem 0.5rem;
-		background: transparent;
+	.btn-icon {
+		background: none;
 		border: none;
-		color: #888;
+		color: #8b949e;
+		padding: 0.5rem;
 		cursor: pointer;
-		font-size: 1.25rem;
-		line-height: 1;
+		display: flex;
+		align-items: center;
+		border-radius: 6px;
+		transition: all 0.2s;
 	}
 
-	.close-button:hover {
-		color: #ff5555;
+	.btn-icon:hover {
+		background: #21262d;
+		color: #fff;
 	}
 </style>

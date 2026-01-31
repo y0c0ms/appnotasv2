@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { openFiles, currentDirectory, activeFile } from '$lib/stores/files';
-	import { invoke } from '@tauri-apps/api/core';
+	import { focusArea } from '$lib/stores/focus';
+	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { detectLanguage } from '$lib/utils/files';
+	import { tick } from 'svelte';
 
 	interface FileEntry {
 		name: string;
@@ -14,6 +16,29 @@
 	let loading = false;
 	let error = '';
 	let selectedIndex = 0;
+	let treeContainer: HTMLElement;
+
+	// Auto-focus container when focusArea switches to 'list' or entries load/change
+	$: if ($focusArea === 'list' && treeContainer && entries) {
+		tick().then(() => {
+			if (document.activeElement !== treeContainer) {
+				treeContainer.focus({ preventScroll: true });
+			}
+		});
+	}
+
+	$: if (treeContainer && entries.length > 0) {
+		scrollToSelected(selectedIndex);
+	}
+
+	async function scrollToSelected(index: number) {
+		await tick();
+		if (!treeContainer) return;
+		const selectedElement = treeContainer.querySelector(`.entry.selected`) as HTMLElement;
+		if (selectedElement) {
+			selectedElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+		}
+	}
 
 	$: if ($currentDirectory) {
 		loadDirectory($currentDirectory);
@@ -47,14 +72,24 @@
 		} else {
 			console.log('Opening file:', entry.path);
 			try {
-				const content = await invoke<string>('read_file', { path: entry.path });
-				console.log('File content loaded, length:', content.length);
+				const isPdf = entry.name.toLowerCase().endsWith('.pdf');
+				let content = '';
+				let type = isPdf ? 'pdf' : 'markdown';
+
+				if (isPdf) {
+					content = convertFileSrc(entry.path);
+				} else {
+					content = await invoke<string>('read_file', { path: entry.path });
+				}
+
+				console.log('File loaded, type:', type);
 				
 				const newFile = {
 					path: entry.path,
 					content,
 					modified: false,
-					language: detectLanguage(entry.name)
+					language: detectLanguage(entry.name),
+					type
 				};
 				
 				openFiles.update((files) => {
@@ -74,6 +109,7 @@
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
+		if ($focusArea !== 'list') return;
 		if (entries.length === 0) return;
 
 		if (e.key === 'ArrowDown') {
@@ -82,12 +118,24 @@
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			selectedIndex = Math.max(selectedIndex - 1, 0);
+		} else if (e.key === 'ArrowRight') {
+			const entry = entries[selectedIndex];
+			if (entry && entry.is_dir) {
+				e.preventDefault();
+				openEntry(entry);
+			}
+		} else if (e.key === 'ArrowLeft') {
+			e.preventDefault();
+			// Go to parent directory if possible
+			const parent = entries.find(e => e.name === '..');
+			if (parent) {
+				openEntry(parent);
+			}
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			openEntry(entries[selectedIndex]);
 		} else if (e.key === 'Backspace' && !e.ctrlKey) {
 			e.preventDefault();
-			// Go to parent directory
 			const parent = entries.find(e => e.name === '..');
 			if (parent) {
 				openEntry(parent);
@@ -112,13 +160,21 @@
 	});
 </script>
 
-<div class="file-tree" on:keydown={handleKeyDown} tabindex="0">
+<div 
+	class="file-tree" 
+	class:focused={$focusArea === 'list'}
+	on:keydown={handleKeyDown} 
+	tabindex="0"
+	role="listbox"
+	aria-label="File Explorer"
+	bind:this={treeContainer}
+>
 	<div class="current-path">
 		{$currentDirectory || 'No directory'}
 	</div>
 
 	<div class="keyboard-hint">
-		<kbd>↑↓</kbd> Navigate • <kbd>Enter</kbd> Open • <kbd>Backspace</kbd> Up
+		<kbd>↑↓</kbd> Navigate • <kbd>←</kbd> Up • <kbd>→</kbd> Enter Folder • <kbd>Enter</kbd> Open File
 	</div>
 
 	{#if loading}
@@ -153,9 +209,10 @@
 		flex-direction: column;
 		background: #1a1a1a;
 		outline: none;
+		transition: outline 0.15s;
 	}
 
-	.file-tree:focus {
+	.file-tree.focused {
 		outline: 2px solid #4a9eff;
 		outline-offset: -2px;
 	}

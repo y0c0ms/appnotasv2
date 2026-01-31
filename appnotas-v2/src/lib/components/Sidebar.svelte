@@ -1,22 +1,29 @@
 <script lang="ts">
+	import { activeTab } from '$lib/stores/shortcuts';
 	import NotesList from './NotesList.svelte';
 	import FileTree from './FileTree.svelte';
-
-	let activeTab: 'notes' | 'files' = 'notes';
 </script>
 
 <div class="sidebar">
 	<div class="tabs">
-		<button class="tab" class:active={activeTab === 'notes'} on:click={() => (activeTab = 'notes')}>
+		<button 
+			class="tab" 
+			class:active={$activeTab === 'notes'} 
+			on:click={() => ($activeTab = 'notes')}
+		>
 			📝 Notes
 		</button>
-		<button class="tab" class:active={activeTab === 'files'} on:click={() => (activeTab = 'files')}>
+		<button 
+			class="tab" 
+			class:active={$activeTab === 'files'} 
+			on:click={() => ($activeTab = 'files')}
+		>
 			📁 Files
 		</button>
 	</div>
 
 	<div class="tab-content">
-		{#if activeTab === 'notes'}
+		{#if $activeTab === 'notes'}
 			<NotesList />
 		{:else}
 			<FileTree />
