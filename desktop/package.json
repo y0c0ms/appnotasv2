@@ -1,0 +1,19 @@
+{
+  "name": "desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitest/ui": "^4.0.18",
+    "jsdom": "^27.4.0",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "marked": "^17.0.1"
+  }
+}

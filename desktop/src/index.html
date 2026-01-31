@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AppNotas</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="markdown.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <!-- Load libraries from CDN to avoid bundler issues -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="titlebar" id="titlebar">
+            <div class="brand">
+                <span>📝</span> AppNotas
+            </div>
+            <div class="titlebar-actions">
+                <button id="settings-btn" class="settings-btn" title="Settings">⚙️</button>
+                <button id="add-btn" class="add-btn" title="Add New Note">+</button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <div id="note-list" class="note-list">
+                    <!-- Note items will be injected here -->
+                </div>
+            </aside>
+
+            <main class="editor" id="editor-pane">
+                <div class="editor-header">
+                    <input type="text" id="note-title" class="editor-title" placeholder="Untitled Note" />
+                    <button id="list-toggle" class="action-btn" title="Toggle Checklist Mode">☑</button>
+                    <button id="pin-btn" class="action-btn" title="Pin Note">📍</button>
+                    <button id="delete-btn" class="action-btn" title="Delete Note">🗑</button>
+                </div>
+
+                <div id="editor-body">
+                    <div id="note-content" class="editor-content" contenteditable="true"
+                        data-placeholder="Start writing something amazing..." spellcheck="false">
+                    </div>
+                    <div id="checklist-container" class="checklist-container" style="display: none;">
+                        <!-- Checklist items will be injected here -->
+                    </div>
+
+                    <!-- Command Palette -->
+                    <div id="command-palette" class="command-palette" style="display: none;">
+                        <div class="command-list" id="command-list">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="toolbar">
+                    <div id="color-picker" class="color-picker">
+                        <!-- Colors will be injected here -->
+                    </div>
+                    <div class="actions">
+                        <button id="ai-improve" class="action-btn ai-btn" title="Improve Note with AI">✨ AI
+                            Improve</button>
+                    </div>
+                </div>
+                <div id="sync-status" class="status-bar">Ready</div>
+            </main>
+
+            <div id="empty-state" class="empty-state">
+                <div class="empty-content">
+                    <div class="empty-icon">📝</div>
+                    <h3>Your thoughts, organized</h3>
+                    <p>Select a note from the sidebar or create a new one to get started.</p>
+                    <button id="empty-add-btn" class="primary-btn">Create Story</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal moved outside main-content -->
+        <div id="settings-modal" class="settings-modal" style="display: none;">
+            <div class="settings-content">
+                <div class="settings-header">
+                    <h3>Settings</h3>
+                    <button id="close-settings" class="icon-btn">✕</button>
+                </div>
+                <div class="settings-body">
+                    <div class="settings-section">
+                        <label>Gemini API Key</label>
+                        <input type="password" id="api-key-input" placeholder="Enter your API key..." />
+                        <p class="hint">Key is saved locally on your device.</p>
+                    </div>
+                    <div class="settings-section">
+                        <label>Keyboard Shortcuts</label>
+                        <div class="hotkey-list">
+                            <div class="hotkey-item"><span>Checklist Mode</span> <kbd>Ctrl + L</kbd></div>
+                            <div class="hotkey-item"><span>Change Colors</span> <kbd>Ctrl + 1-6</kbd></div>
+                            <div class="hotkey-item"><span>Improve with AI</span> <kbd>Ctrl + I</kbd></div>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <label>AI Debug Logs <button id="copy-logs-btn" class="copy-btn">Copy</button></label>
+                        <div id="debug-logs" class="debug-logs">
+                            <span class="dim">No logs yet...</span>
+                        </div>
+                    </div>
+                    <button id="save-settings" class="primary-btn" style="width: 100%;">Save Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Preview Modal -->
+        <div id="ai-preview-modal" class="ai-preview-modal" style="display: none;">
+            <div class="ai-preview-content">
+                <div class="ai-preview-header">
+                    <h3>✨ AI Improvement Preview</h3>
+                    <button id="close-ai-preview" class="icon-btn">✕</button>
+                </div>
+                <div class="comparison">
+                    <div class="comparison-panel original">
+                        <label>Original</label>
+                        <div id="ai-original-text" class="preview-text"></div>
+                    </div>
+                    <div class="comparison-panel improved">
+                        <label>Improved ✨</label>
+                        <div id="ai-improved-text" class="preview-text"></div>
+                    </div>
+                </div>
+                <div class="ai-preview-actions">
+                    <button id="ai-reject-btn" class="secondary-btn">✗ Reject</button>
+                    <button id="ai-accept-btn" class="primary-btn">✓ Accept</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-modal" class="modal" style="display: none;">
+        <div class="modal-overlay" onclick="closeDeleteModal()"></div>
+        <div class="modal-content delete-modal-content">
+            <h3>Delete Code Block?</h3>
+            <p>This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button id="cancel-delete-btn" class="secondary-btn" onclick="closeDeleteModal()">Cancel</button>
+                <button id="confirm-delete-btn" class="danger-btn">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+
+</html>

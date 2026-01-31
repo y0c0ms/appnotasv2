@@ -1,0 +1,12 @@
+[[permission]]
+identifier = "allow-all-commands"
+description = "Allows all internal AppNotas commands"
+commands.allow = [
+    "list_notes",
+    "save_note",
+    "delete_note",
+    "improve_note",
+    "get_api_key",
+    "set_api_key",
+    "drag_window"
+]

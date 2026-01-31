@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-capability.json",
+  "identifier": "default",
+  "description": "Comprehensive permissions for AppNotas",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:app:default",
+    "core:event:default",
+    "core:webview:default",
+    "opener:default",
+    "allow-all-commands"
+  ]
+}
