@@ -12,6 +12,9 @@ export interface AppSettings {
     geminiKey: string;
     notesDirectory: string;
     lastActiveNoteId: string;
+    aiModelPreference: 'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gemini-2.5-flash-lite';
+    zoomLevel: number;
+    pinnedNoteIds: string[];
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -29,7 +32,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     },
     geminiKey: '',
     notesDirectory: '',
-    lastActiveNoteId: ''
+    lastActiveNoteId: '',
+    aiModelPreference: 'gemini-2.5-flash',
+    zoomLevel: 1.0,
+    pinnedNoteIds: []
 };
 
 function createSettingsStore() {

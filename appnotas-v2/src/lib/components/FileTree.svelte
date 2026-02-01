@@ -152,10 +152,18 @@
 
 	// Initialize with user's home directory
 	import { onMount } from 'svelte';
-	onMount(() => {
+    import { homeDir } from '@tauri-apps/api/path';
+
+	onMount(async () => {
 		if (!$currentDirectory) {
-			const homeDir = 'C:\\Users\\Utilizador';
-			currentDirectory.set(homeDir);
+            try {
+			    const home = await homeDir();
+			    currentDirectory.set(home);
+            } catch (e) {
+                console.error('Failed to get home dir:', e);
+                // Fallback for extreme cases
+                currentDirectory.set('/'); 
+            }
 		}
 	});
 </script>
@@ -272,6 +280,8 @@
 		text-align: left;
 		cursor: pointer;
 		transition: all 0.15s;
+		content-visibility: auto;
+		contain-intrinsic-size: 36px;
 	}
 
 	.entry:hover {

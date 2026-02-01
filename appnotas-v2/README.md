@@ -1,42 +1,64 @@
-# sv
+# 📝 AppNotas v2
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A modern, high-performance note-taking application built with **Svelte** and **Tauri**. Featuring a rich-text TipTap editor, AI-assisted writing, and local-first markdown storage.
 
-## Creating a project
+## ✨ Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+- 🚀 **Native Performance**: Built with Rust/Tauri for a lightweight, fast desktop experience.
+- ✍️ **Rich Editor**: Powerful TipTap-based editor with support for Markdown, Task Lists, and Code Blocks.
+- 🎨 **Modern UI**: Sleek dark mode with glassmorphism aesthetics and micro-animations.
+- 🖼️ **Smart Images**: Draggable, resizable images with dual-corner scaling.
+- ✏️ **Drawing Nodes**: Integrated canvas for quick sketches and diagrams.
+- 🤖 **AI Support**: Seamlessly integrate with Google Gemini for text generation and improvement.
+- 📁 **File-First**: Your notes are saved as human-readable `.md` files on your local machine.
 
-```sh
-# create a new project
-npx sv create my-app
+## 📥 Downloads
+
+**Latest Version: v0.1.0**
+
+| Platform | File |
+|----------|------|
+| **Windows** | [Download .exe Installer](bundle/AppNotas_0.1.0_x64-setup.exe) |
+| **Linux** | [Download .rpm Package](bundle/AppNotas-0.1.0-1.x86_64.rpm) |
+
+## 🚀 Getting Started
+
+### Development
+
+Ensure you have [Bun](https://bun.sh/) and [Rust](https://rustup.rs/) installed.
+
+```bash
+# Install dependencies
+bun install
+
+# Start development server
+bun run dev
 ```
 
-To recreate this project with the same configuration:
+### Packaging for Distribution
 
-```sh
-# recreate this project
-npx sv create --template minimal --types ts --install npm appnotas-v2
+AppNotas uses a unified packaging script for generating production-ready installers.
+
+```bash
+# Build the application for your current platform (EXE on Windows, RPM on Linux)
+bun run package
 ```
 
-## Developing
+#### Windows (NSIS)
+The `.exe` installer will be located at:
+`src-tauri/target/release/bundle/nsis/AppNotas_0.1.0_x64-setup.exe`
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+#### Linux (RPM)
+The `.rpm` package will be located at:
+`src-tauri/target/release/bundle/rpm/appnotas-0.1.0-1.x86_64.rpm`
 
-```sh
-npm run dev
+## 🛠️ Configuration
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+AppNotas stores its settings in a local `.settings.json` file. You can configure:
+- **Notes Directory**: Where your `.md` files are stored.
+- **AI Key**: Your Google Gemini API key.
+- **Zoom Level**: Global UI scaling.
 
-## Building
+## ⚖️ License
 
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+MIT License - Copyright (c) 2026 AppNotas Team

@@ -10,14 +10,50 @@
 	import CharacterCount from '@tiptap/extension-character-count';
 	import { Markdown } from 'tiptap-markdown';
 	import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-	import Image from '@tiptap/extension-image';
+	
+	// Internal Custom Extensions
+	import CodeBlockNode from './tiptap/CodeBlockNode.svelte'; 
+    import { SvelteNodeViewRenderer } from 'svelte-tiptap';
+	import { ResizableImage } from '../tiptap/extensions/ResizableImage';
 	import { FileLink } from '../tiptap/extensions/FileLink';
 	import { Drawing } from '../tiptap/extensions/Drawing';
-	import { all, createLowlight } from 'lowlight';
+	import { BlockSelection } from '../tiptap/extensions/BlockSelection';
+	import { AIZone } from '../tiptap/extensions/AIZone';
+
+	// Modularized UI Components
+	import TipTapBubbleMenu from './tiptap/menus/TipTapBubbleMenu.svelte';
+	import TipTapFloatingMenu from './tiptap/menus/TipTapFloatingMenu.svelte';
+	
+	// Utilities
+	import { renderDrawingToPNG } from '../tiptap/utils/drawing';
+	import { createLowlight } from 'lowlight';
+	import js from 'highlight.js/lib/languages/javascript';
+	import ts from 'highlight.js/lib/languages/typescript';
+	import html from 'highlight.js/lib/languages/xml';
+	import css from 'highlight.js/lib/languages/css';
+	import md from 'highlight.js/lib/languages/markdown';
+	import py from 'highlight.js/lib/languages/python';
+	import json from 'highlight.js/lib/languages/json';
 	import { settingsStore } from '$lib/stores/settings';
 	import { get } from 'svelte/store';
 
-	const lowlight = createLowlight(all);
+	// Import modularized styles
+	import '../tiptap/TipTapEditor.css';
+
+	const lowlight = createLowlight();
+	lowlight.register('javascript', js);
+	lowlight.register('typescript', ts);
+	lowlight.register('html', html);
+	lowlight.register('css', css);
+	lowlight.register('markdown', md);
+	lowlight.register('python', py);
+	lowlight.register('json', json);
+
+	interface AIContext {
+		text: string;
+		images: string[];
+		drawings: string[];
+	}
 
 	// Props
 	export let content: string = '';
@@ -25,12 +61,17 @@
 	export let onCommandTrigger: () => void = () => {};
 	export let onFileClick: (path: string) => void = () => {};
 	export let placeholder: string = 'Start writing...';
+	export let onAITrigger: (context: AIContext) => void = () => {};
+	export let mode: 'markdown' | 'code' = 'markdown';
+	export let language: string = 'typescript';
 
 	let element: HTMLElement;
 	let editor: Editor;
 	let updateTimer: ReturnType<typeof setTimeout>;
 	let bubbleMenuElement: HTMLElement;
 	let floatingMenuElement: HTMLElement;
+
+	$: editorZoom = $settingsStore.zoomLevel || 1.0;
 
 	onMount(() => {
 		editor = new Editor({
@@ -46,16 +87,22 @@
 					linkify: true,
 					tightLists: true
 				}),
-				CodeBlockLowlight.configure({ lowlight }),
+				CodeBlockLowlight.extend({
+                    addNodeView() {
+                        return SvelteNodeViewRenderer(CodeBlockNode);
+                    }
+                }).configure({ lowlight }),
 				FileLink.configure({
 					onFileClick,
 					HTMLAttributes: { class: 'file-link-widget' }
 				}),
-				Image.configure({
+				ResizableImage.configure({
 					allowBase64: true,
 					HTMLAttributes: { class: 'tiptap-image' }
 				}),
 				Drawing,
+				BlockSelection,
+				AIZone,
 				TaskList,
 				TaskItem.configure({ nested: true }),
 				BubbleMenu.configure({
@@ -85,15 +132,28 @@
 						onCommandTrigger();
 						return true;
 					}
+					if (event.key === 'Enter' && event.ctrlKey && event.shiftKey) {
+						triggerAI();
+						return true;
+					}
+					if (event.key === 'Tab' && mode === 'code') {
+						editor.commands.insertContent('  ');
+						return true;
+					}
 					return false;
 				}
 			},
 			onUpdate: ({ editor }) => {
-				// Throttle updates for efficiency (especially with long texts)
 				clearTimeout(updateTimer);
 				updateTimer = setTimeout(() => {
-					const markdown = (editor.storage.markdown as any).getMarkdown();
-					onUpdate(markdown);
+					let output;
+					if (mode === 'code') {
+						output = editor.getText();
+					} else {
+						const markdownStorage = editor.storage.markdown as { getMarkdown: () => string };
+						output = markdownStorage.getMarkdown();
+					}
+					onUpdate(output);
 				}, 500);
 			}
 		});
@@ -104,11 +164,25 @@
 		if (editor) editor.destroy();
 	});
 
-	// Reactive content update
+	// Reactive content update from parent
 	$: if (editor && content !== undefined) {
-		const currentMarkdown = (editor.storage.markdown as any).getMarkdown();
-		if (currentMarkdown !== content) {
-			editor.commands.setContent(content, false);
+		const currentText = mode === 'code' 
+            ? editor.getText() 
+            : (editor.storage.markdown as { getMarkdown: () => string }).getMarkdown();
+		
+		if (currentText !== content && !editor.isFocused) {
+			if (mode === 'code') {
+				editor.commands.setContent({
+					type: 'doc',
+					content: [{
+						type: 'codeBlock',
+						attrs: { language: language },
+						content: [{ type: 'text', text: content || '' }]
+					}]
+				}, false);
+			} else {
+				editor.commands.setContent(content, false);
+			}
 		}
 	}
 
@@ -116,46 +190,56 @@
 	export function getEditor() {
 		return editor;
 	}
+
+	async function triggerAI() {
+		if (!editor) return;
+		const context = await getSelectionContext();
+		onAITrigger(context);
+	}
+
+	async function getSelectionContext(): Promise<AIContext> {
+		const { from, to } = editor.state.selection;
+		const text = editor.state.doc.textBetween(from, to, ' ');
+		
+		const images: string[] = [];
+		const drawings: string[] = [];
+
+		editor.state.doc.nodesBetween(from, to, (node) => {
+			if (node.type.name === 'image') {
+				images.push(node.attrs.src);
+			} else if (node.type.name === 'drawing') {
+				const png = renderDrawingToPNG(node.attrs.lines, node.attrs.height);
+				drawings.push(png);
+			}
+		});
+
+		return { text, images, drawings };
+	}
 </script>
 
 <div class="tiptap-wrapper">
 	{#if editor && $settingsStore.showEditorMenus}
-		<div use:editor.registerBubbleMenu={{ element: bubbleMenuElement }} class="bubble-menu">
-			<button
-				on:click={() => editor.chain().focus().toggleBold().run()}
-				class:active={editor.isActive('bold')}
-			>
-				<b>B</b>
-			</button>
-			<button
-				on:click={() => editor.chain().focus().toggleItalic().run()}
-				class:active={editor.isActive('italic')}
-			>
-				<i>I</i>
-			</button>
-			<button
-				on:click={() => editor.chain().focus().toggleStrike().run()}
-				class:active={editor.isActive('strike')}
-			>
-				<s>S</s>
-			</button>
-			<button
-				on:click={() => editor.chain().focus().toggleCode().run()}
-				class:active={editor.isActive('code')}
-			>
-				{'<>'}
-			</button>
+		<div use:editor.registerBubbleMenu={{ element: bubbleMenuElement }}>
+			<TipTapBubbleMenu 
+				{editor} 
+				{mode} 
+				onAITrigger={triggerAI} 
+			/>
 		</div>
 
-		<div use:editor.registerFloatingMenu={{ element: floatingMenuElement }} class="floating-menu">
-			<button on:click={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>H1</button>
-			<button on:click={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</button>
-			<button on:click={() => editor.chain().focus().toggleBulletList().run()}>• List</button>
-			<button on:click={() => editor.chain().focus().toggleTaskList().run()}>☑ Task</button>
-		</div>
+		{#if mode === 'markdown'}
+			<div use:editor.registerFloatingMenu={{ element: floatingMenuElement }}>
+				<TipTapFloatingMenu {editor} />
+			</div>
+		{/if}
 	{/if}
 
-	<div bind:this={element} class="tiptap-container"></div>
+	<div 
+		bind:this={element} 
+		class="tiptap-container"
+		spellcheck={mode === 'markdown' ? 'true' : 'false'}
+		style="zoom: {editorZoom}"
+	></div>
 	
 	{#if editor}
 		<div class="editor-stats">
@@ -164,10 +248,8 @@
 	{/if}
 </div>
 
-<!-- Bindable elements for menus -->
 <div bind:this={bubbleMenuElement} style="display: none"></div>
 <div bind:this={floatingMenuElement} style="display: none"></div>
-
 
 <style>
 	.tiptap-wrapper {
@@ -183,37 +265,6 @@
 		overflow: auto;
 	}
 
-	.bubble-menu, .floating-menu {
-		display: flex;
-		background-color: #2a2a2a;
-		padding: 0.2rem;
-		border-radius: 0.5rem;
-		border: 1px solid #3a3a3a;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-		gap: 2px;
-	}
-
-	.bubble-menu button, .floating-menu button {
-		background: none;
-		border: none;
-		color: #e0e0e0;
-		padding: 0.4rem 0.6rem;
-		border-radius: 0.3rem;
-		cursor: pointer;
-		font-size: 0.85rem;
-		transition: background 0.2s, color 0.2s;
-	}
-
-	.bubble-menu button:hover, .floating-menu button:hover {
-		background-color: #3a3a3a;
-		color: #fff;
-	}
-
-	.bubble-menu button.active {
-		background-color: #4a9eff;
-		color: #fff;
-	}
-
 	.editor-stats {
 		position: absolute;
 		bottom: 1rem;
@@ -224,247 +275,5 @@
 		background: rgba(13, 17, 23, 0.8);
 		padding: 2px 8px;
 		border-radius: 10px;
-	}
-
-	:global(.tiptap-editor) {
-		height: 100%;
-		padding: 2rem 3rem;
-		color: #e0e0e0;
-		background: transparent;
-		outline: none;
-	}
-
-	:global(.tiptap-editor p.is-editor-empty:first-child::before) {
-		color: #555;
-		content: attr(data-placeholder);
-		float: left;
-		height: 0;
-		pointer-events: none;
-	}
-
-	:global(.tiptap-editor h1) {
-		font-size: 2.25rem;
-		font-weight: 800;
-		margin: 2rem 0 1rem 0;
-		color: #fff;
-		border-bottom: 2px solid #333;
-		padding-bottom: 0.5rem;
-	}
-
-	:global(.tiptap-editor h2) {
-		font-size: 1.75rem;
-		font-weight: 700;
-		margin: 1.5rem 0 0.75rem 0;
-		color: #fff;
-	}
-
-	:global(.tiptap-editor h3) {
-		font-size: 1.4rem;
-		font-weight: 600;
-		margin: 1.25rem 0 0.5rem 0;
-		color: #eee;
-	}
-
-	:global(.tiptap-editor p) {
-		margin: 0.75rem 0;
-		line-height: 1.7;
-	}
-
-	:global(.tiptap-editor ul),
-	:global(.tiptap-editor ol) {
-		padding-left: 2rem;
-		margin: 0.75rem 0;
-	}
-
-	:global(.tiptap-editor li) {
-		margin: 0.4rem 0;
-	}
-
-	:global(.tiptap-editor code) {
-		background: rgba(255, 255, 255, 0.1);
-		color: #ec4899;
-		padding: 0.2rem 0.4rem;
-		border-radius: 4px;
-		font-family: 'Fira Code', monospace;
-		font-size: 0.9em;
-	}
-
-	:global(.tiptap-editor pre) {
-		background: #0d1117;
-		color: #abb2bf;
-		padding: 1.5rem;
-		border-radius: 12px;
-		overflow-x: auto;
-		margin: 2rem 0;
-		border: 1px solid #30363d;
-		font-family: 'Fira Code', monospace;
-		position: relative;
-		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-	}
-
-	:global(.tiptap-editor pre::before) {
-		content: attr(data-language);
-		position: absolute;
-		top: 0;
-		right: 1.5rem;
-		background: #30363d;
-		color: #8b949e;
-		font-size: 0.7rem;
-		padding: 0.2rem 0.6rem;
-		border-radius: 0 0 6px 6px;
-		text-transform: uppercase;
-		font-weight: bold;
-	}
-
-	:global(.tiptap-editor pre code) {
-		background: none;
-		color: inherit;
-		padding: 0;
-		font-size: 0.95rem;
-		line-height: 1.7;
-		display: block;
-	}
-
-	:global(.tiptap-link) {
-		color: #4a9eff;
-		text-decoration: underline;
-		cursor: pointer;
-	}
-
-	:global(.tiptap-link:hover) {
-		color: #60a5fa;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList']) {
-		list-style: none;
-		padding-left: 0.5rem;
-		margin: 1rem 0;
-	}
-
-	:global(.tiptap-editor .drawing-node) {
-		margin: 1.5rem 0;
-		border: 1px solid #333;
-		border-radius: 8px;
-		background: #1e1e1e;
-		overflow: hidden;
-	}
-
-	:global(.tiptap-editor .drawing-container) {
-		position: relative;
-		width: 100%;
-		overflow: hidden;
-	}
-
-	:global(.tiptap-editor canvas) {
-		display: block;
-		width: 100%;
-		height: 100%;
-	}
-
-	:global(.tiptap-editor .drawing-resize-handle) {
-		height: 8px;
-		background: #2a2a2a;
-		cursor: ns-resize;
-		border-top: 1px solid #3a3a3a;
-		transition: background 0.2s;
-	}
-
-	:global(.tiptap-editor .drawing-resize-handle:hover) {
-		background: #4a9eff;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li) {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.75rem;
-		margin: 0.5rem 0;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li label) {
-		flex-shrink: 0;
-		margin-top: 0.15rem;
-		user-select: none;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li > div > p) {
-		margin: 0;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li input[type='checkbox']) {
-		appearance: none;
-		width: 1.1rem;
-		height: 1.1rem;
-		border: 2px solid #555;
-		border-radius: 4px;
-		background: #1a1a1a;
-		cursor: pointer;
-		position: relative;
-		transition: all 0.2s;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li input[type='checkbox']:checked) {
-		background: #4a9eff;
-		border-color: #4a9eff;
-		transform: scale(1.1);
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li input[type='checkbox']:checked::after) {
-		content: '✓';
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		color: white;
-		font-size: 0.8rem;
-		font-weight: bold;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li > div) {
-		flex: 1;
-		margin: 0;
-	}
-
-	:global(.tiptap-editor ul[data-type='taskList'] li[data-checked='true'] > div) {
-		text-decoration: line-through;
-		opacity: 0.5;
-		color: #888;
-	}
-
-	:global(.file-link-widget) {
-		display: inline-flex;
-		align-items: center;
-		background: rgba(74, 158, 255, 0.1);
-		border: 1px solid rgba(74, 158, 255, 0.2);
-		border-radius: 6px;
-		padding: 4px 10px;
-		color: #4a9eff;
-		cursor: pointer;
-		margin: 0 4px;
-		font-size: 0.95rem;
-		transition: all 0.2s;
-		font-weight: 500;
-	}
-
-	:global(.file-link-widget:hover) {
-		background: rgba(74, 158, 255, 0.2);
-		border-color: rgba(74, 158, 255, 0.4);
-	}
-
-	:global(.drawing-node) {
-		margin: 2rem 0;
-		width: 100%;
-		max-width: 800px;
-		margin-left: auto;
-		margin-right: auto;
-	}
-
-	:global(.tiptap-image) {
-		display: block;
-		max-width: 100%;
-		height: auto;
-		border-radius: 12px;
-		margin: 2rem auto;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-		border: 1px solid #333;
 	}
 </style>

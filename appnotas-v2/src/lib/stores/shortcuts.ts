@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { focusArea, nextFocusArea, prevFocusArea } from './focus';
 import { openFiles } from './files';
+import { settingsStore } from './settings';
 
 export const commandPaletteOpen = writable(false);
 export const saveRequested = writable(false);
@@ -10,6 +11,16 @@ export const fileInsertRequested = writable(false);
 export const listModeToggleRequested = writable(false);
 export const settingsOpen = writable(false);
 export const activeTab = writable<'notes' | 'files'>('notes');
+
+async function updateZoom(delta: number) {
+    const settings = get(settingsStore);
+    const newZoom = Math.max(0.5, Math.min(3.0, settings.zoomLevel + delta));
+    settingsStore.update(s => ({ ...s, zoomLevel: newZoom }));
+}
+
+async function resetZoom() {
+    settingsStore.update(s => ({ ...s, zoomLevel: 1.0 }));
+}
 
 export function setupGlobalShortcuts() {
     if (typeof window === 'undefined') return;
@@ -32,13 +43,20 @@ export function setupGlobalShortcuts() {
             setTimeout(() => saveRequested.set(false), 100);
         }
 
-        // Ctrl+1/2/3/4/5 - Change note color
-        if (e.ctrlKey && ['1', '2', '3', '4', '5'].includes(e.key)) {
+        // Ctrl+1/2/3/4/5/0 - Change note color
+        if (e.ctrlKey && ['1', '2', '3', '4', '5', '0'].includes(e.key)) {
             e.preventDefault();
-            const colors = ['default', 'red', 'yellow', 'green', 'blue'];
-            const colorIndex = parseInt(e.key) - 1;
-            console.log('Color change requested:', colors[colorIndex]);
-            colorChangeRequested.set(colors[colorIndex]);
+            const colors: Record<string, string> = {
+                '1': 'red',
+                '2': 'yellow',
+                '3': 'green',
+                '4': 'blue',
+                '5': 'purple',
+                '0': 'default'
+            };
+            const color = colors[e.key];
+            console.log('Color change requested:', color);
+            colorChangeRequested.set(color);
             setTimeout(() => colorChangeRequested.set(null), 100);
         }
 
@@ -54,7 +72,6 @@ export function setupGlobalShortcuts() {
         if (e.ctrlKey && e.key === 'k') {
             e.preventDefault();
             console.log('Ctrl+K pressed! Toggling editor menus');
-            // We'll handle this in the main app to keep shortcuts.ts generic
             const event = new CustomEvent('toggle-editor-menus');
             window.dispatchEvent(event);
         }
@@ -74,8 +91,8 @@ export function setupGlobalShortcuts() {
             console.log('Ctrl+Tab pressed! Switching sidebar tab and focusing list');
         }
 
-        // Alt+Left - Move focus area left
-        if (e.altKey && e.key === 'ArrowLeft') {
+        // Ctrl+Left - Move focus area left
+        if (e.ctrlKey && e.key === 'ArrowLeft') {
             e.preventDefault();
             const current = get(focusArea);
             let next = prevFocusArea(current);
@@ -89,12 +106,12 @@ export function setupGlobalShortcuts() {
                 }
             }
 
-            console.log('Alt+Left pressed! Moving focus from', current, 'to', next);
+            console.log('Ctrl+Left pressed! Moving focus from', current, 'to', next);
             focusArea.set(next);
         }
 
-        // Alt+Right - Move focus area right
-        if (e.altKey && e.key === 'ArrowRight') {
+        // Ctrl+Right - Move focus area right
+        if (e.ctrlKey && e.key === 'ArrowRight') {
             e.preventDefault();
             const current = get(focusArea);
             let next = nextFocusArea(current);
@@ -108,8 +125,26 @@ export function setupGlobalShortcuts() {
                 }
             }
 
-            console.log('Alt+Right pressed! Moving focus from', current, 'to', next);
+            console.log('Ctrl+Right pressed! Moving focus from', current, 'to', next);
             focusArea.set(next);
+        }
+
+        // Ctrl++ or Ctrl+= - Zoom In
+        if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
+            e.preventDefault();
+            updateZoom(0.1);
+        }
+
+        // Ctrl+- - Zoom Out
+        if (e.ctrlKey && e.key === '-') {
+            e.preventDefault();
+            updateZoom(-0.1);
+        }
+
+        // Ctrl+0 - Reset Zoom
+        if (e.ctrlKey && e.key === '0') {
+            e.preventDefault();
+            resetZoom();
         }
 
         // Escape - Close command palette and settings

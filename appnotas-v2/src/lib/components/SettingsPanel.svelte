@@ -57,16 +57,16 @@
             <p class="hint">Colors used for Ctrl+1, Ctrl+2, and Ctrl+3</p>
             <div class="color-grid">
                 <div class="color-item">
-                    <label>Ctrl+1</label>
-                    <input type="color" bind:value={$settingsStore.customColors.ctrl1} on:change={save} />
+                    <label for="color-ctrl1">Ctrl+1</label>
+                    <input id="color-ctrl1" type="color" bind:value={$settingsStore.customColors.ctrl1} on:change={save} />
                 </div>
                 <div class="color-item">
-                    <label>Ctrl+2</label>
-                    <input type="color" bind:value={$settingsStore.customColors.ctrl2} on:change={save} />
+                    <label for="color-ctrl2">Ctrl+2</label>
+                    <input id="color-ctrl2" type="color" bind:value={$settingsStore.customColors.ctrl2} on:change={save} />
                 </div>
                 <div class="color-item">
-                    <label>Ctrl+3</label>
-                    <input type="color" bind:value={$settingsStore.customColors.ctrl3} on:change={save} />
+                    <label for="color-ctrl3">Ctrl+3</label>
+                    <input id="color-ctrl3" type="color" bind:value={$settingsStore.customColors.ctrl3} on:change={save} />
                 </div>
             </div>
         </section>
@@ -74,7 +74,7 @@
         <section>
             <h3>File System</h3>
             <div class="setting-item column">
-                <label>Notes Directory</label>
+                <span class="label">Notes Directory</span>
                 <div class="dir-picker">
                     <span class="dir-path" title={$settingsStore.notesDirectory}>
                         {$settingsStore.notesDirectory || 'No directory selected'}
@@ -98,7 +98,20 @@
                     class="text-input"
                 />
             </div>
-            <p class="hint">Used for future AI-powered writing assistance</p>
+            <div class="setting-item column" style="margin-top: 1rem;">
+                <label for="model-pref">Model Preference</label>
+                <select 
+                    id="model-pref"
+                    bind:value={$settingsStore.aiModelPreference} 
+                    on:change={save}
+                    class="text-input select-input"
+                >
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Balanced)</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Powerful)</option>
+                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Fast)</option>
+                </select>
+            </div>
+            <p class="hint">Recommended hierarchy: Flash > Pro > Flash Lite</p>
         </section>
 
         <section>

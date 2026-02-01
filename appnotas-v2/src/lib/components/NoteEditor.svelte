@@ -13,7 +13,7 @@
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 	import TipTapEditor from './TipTapEditor.svelte';
-	import CodeInsertDialog from './CodeInsertDialog.svelte';
+	import AIPalette from './AIPalette.svelte';
 	import CommandPalette from './CommandPalette.svelte';
 
 	let title = $activeNote?.title || '';
@@ -21,6 +21,8 @@
 	let editor: any;
 	let saveTimeout: ReturnType<typeof setTimeout>;
 	let showCommandPalette = false;
+	let showAIPalette = false;
+	let aiContext: any = null;
 
 	onMount(() => {
 		settingsStore.init();
@@ -48,8 +50,15 @@
 		setNoteColor($activeNote.id, colorMap[color] || color);
 	}
 
-	// Get color class
-	$: colorClass = $activeNote?.color || 'default';
+	// Get color hex
+	$: colorHex = $activeNote?.color || 'default';
+
+	// Calculate background style
+	$: backgroundStyle = colorHex === 'default' 
+		? 'background: #0d1117;' 
+		: `background: linear-gradient(180deg, ${colorHex}1A 0%, #0d1117 100%);`;
+	
+	$: borderStyle = 'border-left: none;';
 
 	// Update title when active note changes
 	$: if ($activeNote) {
@@ -117,9 +126,10 @@
 
 	// Handle code insert
 	async function handleCodeInsert() {
-		console.log('NoteEditor: triggering code insert dialog');
-		// Open code dialog
-		window.dispatchEvent(new CustomEvent('openCodeDialog'));
+		const tiptapEditor = editor?.getEditor();
+		if (tiptapEditor) {
+			tiptapEditor.chain().focus().setCodeBlock().run();
+		}
 	}
 
 	// Handle file link
@@ -186,21 +196,20 @@
 				handleFileLink();
 				break;
 			case 'code':
-				handleCodeInsert();
+				tiptapEditor.chain().focus().setCodeBlock().run();
 				break;
 		}
 	}
 
-	// Listen for code block insert from dialog
 	function handleCodeBlockInsert(event: CustomEvent) {
-		const { codeBlock } = event.detail;
+		const { code, language } = event.detail;
 		const tiptapEditor = editor?.getEditor();
 		
 		if (tiptapEditor) {
 			tiptapEditor
 				.chain()
 				.focus()
-				.insertContent(codeBlock + '\n')
+				.insertContent(`\`\`\`${language}\n${code}\n\`\`\``)
 				.run();
 		}
 	}
@@ -265,29 +274,54 @@
 	});
 </script>
 
-<CodeInsertDialog />
 
 {#if showCommandPalette}
-	<div class="command-palette-wrapper" on:click|self={() => (showCommandPalette = false)} role="dialog">
-		<CommandPalette
-			on:openCodeDialog={() => {
-				showCommandPalette = false;
-				handleCodeInsert();
-			}}
-			on:openFileDialog={() => {
-				showCommandPalette = false;
-				handleFileLink();
-			}}
+	<div 
+		class="command-palette-wrapper" 
+		on:click|self={() => (showCommandPalette = false)} 
+		on:keydown={(e) => e.key === 'Escape' && (showCommandPalette = false)}
+		role="button"
+		tabindex="0"
+		aria-label="Close command palette"
+	>
+		<div 
+			role="dialog" 
+			tabindex={-1}
+			aria-modal="true" 
+			aria-label="Command Palette"
+		>
+			<CommandPalette
+				on:openCodeDialog={() => {
+					showCommandPalette = false;
+					handleCodeInsert();
+				}}
+				on:openFileDialog={() => {
+					showCommandPalette = false;
+					handleFileLink();
+				}}
 			on:openDialog={(e) => {
 				showCommandPalette = false;
 				handleCommand(e.detail.id);
 			}}
 			on:close={() => (showCommandPalette = false)}
 		/>
+		</div>
 	</div>
 {/if}
 
-<div class="note-editor color-{colorClass}" class:focused={$focusArea === 'editor'}>
+{#if showAIPalette && aiContext}
+	<AIPalette 
+		context={aiContext}
+		editor={editor?.getEditor()}
+		on:close={() => (showAIPalette = false)}
+	/>
+{/if}
+
+<div 
+	class="note-editor" 
+	class:focused={$focusArea === 'editor'}
+	style="{backgroundStyle} {borderStyle}"
+>
 	<input
 		class="note-title"
 		bind:value={title}
@@ -304,6 +338,10 @@
 					content={$activeNote.content}
 					onUpdate={handleContentUpdate}
 					onCommandTrigger={() => (showCommandPalette = true)}
+					onAITrigger={(ctx) => {
+						aiContext = ctx;
+						showAIPalette = true;
+					}}
 					onFileClick={handleFileClick}
 					placeholder="Start writing... Type @ for commands"
 				/>
@@ -327,24 +365,24 @@
 		flex-direction: column;
 		height: 100%;
 		overflow: hidden;
-		transition: outline 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+		border: none !important;
+		outline: none !important;
+		padding-left: 1rem;
 	}
 
 	.note-editor.focused {
-		outline: 2px solid #4a9eff;
-		outline-offset: -2px;
+		box-shadow: inset 0 0 0 1px rgba(74, 158, 239, 0.4);
 	}
 
 	.note-title {
 		width: 100%;
-		padding: 1rem 1.5rem;
+		padding: 1.5rem 2rem 1rem 4rem;
 		font-size: 1.75rem;
-		font-weight: 600;
+		font-weight: 700;
 		border: none;
 		background: transparent;
 		color: #fff;
 		outline: none;
-		border-bottom: 1px solid #2a2a2a;
 	}
 
 	.note-title::placeholder {
@@ -354,16 +392,17 @@
 	.editor-wrapper {
 		flex: 1;
 		overflow: auto;
-		background: #0d1117;
+		background: transparent;
+		border: none !important;
+		outline: none !important;
 	}
 
 	.note-hints {
-		padding: 0.75rem 1.5rem;
+		padding: 0.75rem 2rem;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		background: #0d1117;
-		border-top: 1px solid #1a1a1a;
+		background: transparent;
 		font-size: 0.875rem;
 		color: #6b7280;
 	}
@@ -385,30 +424,5 @@
 		padding: 1rem;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 		min-width: 300px;
-	}
-
-	/* Color variants */
-	.color-red {
-		border-left: 4px solid #ef4444;
-	}
-
-	.color-blue {
-		border-left: 4px solid #3b82f6;
-	}
-
-	.color-green {
-		border-left: 4px solid #10b981;
-	}
-
-	.color-yellow {
-		border-left: 4px solid #f59e0b;
-	}
-
-	.color-purple {
-		border-left: 4px solid #8b5cf6;
-	}
-
-	.color-pink {
-		border-left: 4px solid #ec4899;
 	}
 </style>

@@ -1,5 +1,5 @@
 {
-  "showEditorMenus": true,
+  "showEditorMenus": false,
   "customColors": {
     "ctrl1": "#ff4a4a",
     "ctrl2": "#4a9eff",
@@ -11,7 +11,12 @@
     "newNote": "Control+n",
     "search": "Control+f"
   },
-  "geminiKey": "",
+  "geminiKey": "AIzaSyAab04UzkozY9miMCbKZqw9rbZ2t3wEmFE",
   "notesDirectory": "C:\\Users\\Utilizador\\Documents\\notes",
-  "lastActiveNoteId": "note-20260130-231315-note-jan-30-1113-pm.md"
+  "lastActiveNoteId": "note-20260131-163235-note-jan-31-0432-pm.md",
+  "aiModelPreference": "gemini-2.5-flash",
+  "zoomLevel": 1,
+  "pinnedNoteIds": [
+    "note-20260131-163235-note-jan-31-0432-pm.md"
+  ]
 }

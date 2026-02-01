@@ -43,6 +43,12 @@
 		isOpen = true;
 		code = '';
 		language = 'javascript';
+		
+		// Focus the textarea after it renders
+		setTimeout(() => {
+			const textarea = document.querySelector('.code-input') as HTMLTextAreaElement;
+			if (textarea) textarea.focus();
+		}, 0);
 	}
 
 	export function close() {
@@ -53,11 +59,10 @@
 	function handleInsert() {
 		if (!code.trim()) return;
 
-		// Dispatch event with the code block
-		const codeBlock = `\`\`\`${language}\n${code}\n\`\`\``;
+		// Dispatch event with the code and language
 		window.dispatchEvent(
 			new CustomEvent('insertCodeBlock', {
-				detail: { codeBlock }
+				detail: { code, language }
 			})
 		);
 
@@ -74,10 +79,25 @@
 </script>
 
 {#if isOpen}
-	<div class="modal-overlay" on:click={close}>
-		<div class="modal-content" on:click|stopPropagation>
+	<div 
+		class="modal-overlay" 
+		on:click={close} 
+		on:keydown={(e) => e.key === 'Escape' && close()}
+		role="button"
+		tabindex="0"
+		aria-label="Close dialog"
+	>
+		<div 
+			class="modal-content" 
+			on:click|stopPropagation 
+			on:keydown|stopPropagation
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="dialog-title"
+			tabindex="-1"
+		>
 			<div class="modal-header">
-				<h3>Insert Code Snippet</h3>
+				<h3 id="dialog-title">Insert Code Snippet</h3>
 				<button class="close-btn" on:click={close}>×</button>
 			</div>
 
@@ -97,7 +117,6 @@
 					on:keydown={handleKeydown}
 					placeholder="Paste or type your code here...
 Ctrl+Enter to insert"
-					autofocus
 				></textarea>
 			</div>
 

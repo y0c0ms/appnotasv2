@@ -13,6 +13,8 @@
     "fs:allow-write",
     "fs:allow-exists",
     "dialog:allow-open",
-    "dialog:default"
+    "dialog:default",
+    "core:webview:allow-set-webview-zoom",
+    "core:path:default"
   ]
 }

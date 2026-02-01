@@ -157,31 +157,17 @@
 				})}`;
 				const note = await createNoteFile(title);
 				console.log('File-based note created:', note.id);
-				// activeFile.set(null); // No need to manually clear if switching tab or logic handles it
 			} catch (e) {
 				console.error('Failed to create file-based note:', e);
 				error = String(e);
 			}
 		} else {
-			// Fall back to in-memory notes
-			const newNote: Note = {
-				id: crypto.randomUUID(),
-				title: 'Untitled Note',
-				content: '',
-				created_at: new Date().toISOString(),
-				updated_at: new Date().toISOString(),
-				tags: []
-			};
-			
-			try {
-				await invoke('save_note', { note: newNote });
-				console.log('In-memory note created:', newNote.id);
-				
-				notesList.update((n) => [newNote, ...n]);
-				activeNoteId.set(newNote.id);
-			} catch (e) {
-				console.error('Failed to create note:', e);
-			}
+			// Warn user and open settings
+			error = 'Please configure a Notes Directory in Settings before creating notes.';
+			settingsOpen.set(true);
+			// Force tab to notes to show the list area where the error might be visible
+			activeTab.set('notes');
+			setTimeout(() => (error = ''), 5000);
 		}
 	}
 
@@ -198,6 +184,7 @@
 		console.log('✅ Shortcuts initialized and settings loaded');
 
 		const dir = get(settingsStore).notesDirectory;
+
 		if (dir) {
 			console.log('📂 Loading saved notes directory:', dir);
 			try {
@@ -236,7 +223,7 @@
 			activeTab.set('files');
 
 			// 2. Set the current directory to the folder containing the file
-			const lastSlash = path.lastIndexOf('\\');
+			const lastSlash = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
 			if (lastSlash !== -1) {
 				const parentDir = path.substring(0, lastSlash);
 				console.log('📂 Navigating to parent directory:', parentDir);
@@ -299,7 +286,7 @@
 	<div class="main-grid" class:show-settings={$settingsOpen}>
 		<div class="editor-section">
 			<header>
-				<h1>AppNotas v2</h1>
+				<h1></h1>
 				<div class="header-actions">
 					<button class="btn-icon" on:click={() => settingsOpen.update(v => !v)} title="Settings (Ctrl+,)">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -320,10 +307,12 @@
 			{:else}
 				{#if $activeTab === 'files' && $openFiles.length > 0}
 					<div 
+						role="tablist"
+						tabindex={0}
+						aria-label="Open files tabs"
 						class="content-tabs" 
 						class:focused={$focusArea === 'file-tabs'}
 						on:keydown={handleToolbarKeyDown}
-						tabindex="0"
 						bind:this={tabsContainer}
 					>
 						<div class="tabs-scroll">
@@ -366,6 +355,7 @@
 									<FileEditor
 										content={$activeFile.content}
 										language={$activeFile.language}
+										{handleFileClick}
 										onSave={(content) => handleSave($activeFile, content)}
 										onModified={(modified) => {
 											if (modified !== $activeFile.modified) {
@@ -416,6 +406,17 @@
 		padding: 0;
 	}
 
+	/* Refined focus reset */
+	:global(*:focus) {
+		outline: none !important;
+	}
+
+	/* Specific focus indicators for navigation areas */
+	:global(.content-tabs:focus-within), 
+	:global(.sidebar:focus-within) {
+		box-shadow: inset 0 0 0 1px rgba(74, 158, 239, 0.4) !important;
+	}
+
 	.app {
 		display: flex;
 		height: 100vh;
@@ -444,6 +445,7 @@
 		height: 100%;
 		overflow: hidden;
 		background: #0d1117;
+		outline: none !important;
 	}
 
 	header {
@@ -493,8 +495,7 @@
 	}
 
 	.content-tabs.focused {
-		outline: 2px solid #4a9eff;
-		outline-offset: -2px;
+		box-shadow: inset 0 0 0 1px rgba(74, 158, 239, 0.4);
 	}
 
 	.tabs-scroll {
@@ -565,6 +566,7 @@
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
+		outline: none !important;
 	}
 
 	.loading,

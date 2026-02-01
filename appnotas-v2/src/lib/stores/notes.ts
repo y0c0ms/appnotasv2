@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { settingsStore } from './settings';
 
@@ -11,6 +11,7 @@ export interface Note {
     updated_at: string;
     tags: string[];
     color?: string; // Color code: 'default', 'red', 'yellow', 'green', 'blue', 'purple'
+    pinned?: boolean;
 }
 
 // Notes directory path
@@ -21,6 +22,9 @@ export const notesList = writable<Note[]>([]);
 
 // Currently active note ID
 export const activeNoteId = writable<string | null>(null);
+
+// Search Query
+export const searchQuery = writable<string>('');
 
 // Sync activeNoteId to settings for persistence
 activeNoteId.subscribe(id => {
@@ -40,14 +44,14 @@ export const activeNote = derived(
 );
 
 /**
- * Initialize notes system - load directory from config
+ * Initialize notes system - load directory from settings
  */
 export async function initNotes() {
     try {
-        const dir = await invoke<string | null>('get_notes_directory');
-        if (dir) {
-            notesDirectory.set(dir);
-            await loadNotes(dir);
+        const settings = get(settingsStore);
+        if (settings.notesDirectory) {
+            notesDirectory.set(settings.notesDirectory);
+            await loadNotes(settings.notesDirectory);
         }
     } catch (error) {
         console.error('Failed to init notes:', error);
@@ -59,7 +63,8 @@ export async function initNotes() {
  */
 export async function setNotesDirectory(directory: string) {
     try {
-        await invoke('set_notes_directory', { directory });
+        settingsStore.update(s => ({ ...s, notesDirectory: directory }));
+        await settingsStore.save();
         notesDirectory.set(directory);
         await loadNotes(directory);
     } catch (error) {
@@ -75,13 +80,23 @@ export async function loadNotes(directory?: string) {
     try {
         let dir = directory;
         if (!dir) {
-            const stored = await invoke<string | null>('get_notes_directory');
-            if (!stored) return;
-            dir = stored;
+            const settings = get(settingsStore);
+            if (!settings.notesDirectory) return;
+            dir = settings.notesDirectory;
         }
 
         const notes = await invoke<Note[]>('list_notes_files', { directory: dir });
-        notesList.set(notes);
+
+        // Re-apply pinned state from settings
+        const settings = get(settingsStore);
+        const pinnedIds = settings.pinnedNoteIds || [];
+
+        const mergedNotes = notes.map(note => ({
+            ...note,
+            pinned: pinnedIds.includes(note.id)
+        }));
+
+        notesList.set(mergedNotes);
     } catch (error) {
         console.error('Failed to load notes:', error);
         notesList.set([]);
@@ -95,11 +110,11 @@ export async function createNoteFile(title: string, directory?: string) {
     try {
         let dir = directory;
         if (!dir) {
-            const stored = await invoke<string | null>('get_notes_directory');
-            if (!stored) {
+            const settings = get(settingsStore);
+            if (!settings.notesDirectory) {
                 throw new Error('No notes directory set');
             }
-            dir = stored;
+            dir = settings.notesDirectory;
         }
 
         const note = await invoke<Note>('create_note_file', {
@@ -122,7 +137,15 @@ export async function createNoteFile(title: string, directory?: string) {
  */
 export async function saveNoteToFile(id: string, content: string) {
     try {
-        await invoke('save_note_to_file', { id, content });
+        const notes = get(notesList);
+        const note = notes.find(n => n.id === id);
+        if (!note || !note.path) throw new Error('Note or path not found');
+
+        await invoke('save_note_to_file', {
+            path: note.path,
+            content,
+            title: note.title
+        });
 
         // Update local state
         notesList.update(notes =>
@@ -155,11 +178,38 @@ export async function setNoteColor(id: string, color: string) {
 }
 
 /**
+ * Toggle note pin state
+ */
+export async function toggleNotePin(id: string) {
+    try {
+        // Update local state
+        notesList.update(notes =>
+            notes.map(n => n.id === id ? { ...n, pinned: !n.pinned } : n)
+        );
+
+        // Persist to settings
+        const currentNotes = get(notesList);
+        const pinnedIds = currentNotes.filter(n => n.pinned).map(n => n.id);
+
+        settingsStore.update(s => ({ ...s, pinnedNoteIds: pinnedIds }));
+        await settingsStore.save();
+
+    } catch (error) {
+        console.error('Failed to toggle note pin:', error);
+        throw error;
+    }
+}
+
+/**
  * Delete note file
  */
 export async function deleteNoteFile(id: string) {
     try {
-        await invoke('delete_note_file', { id });
+        const notes = get(notesList);
+        const note = notes.find(n => n.id === id);
+        if (!note || !note.path) throw new Error('Note or path not found');
+
+        await invoke('delete_note_file', { path: note.path });
 
         notesList.update(notes => notes.filter(n => n.id !== id));
 
@@ -171,18 +221,16 @@ export async function deleteNoteFile(id: string) {
     }
 }
 
-/**
- * Search in note titles and content
- */
-export function searchNotes(query: string) {
-    return derived(notesList, $notes => {
-        if (!query.trim()) return $notes;
+// Derived: Get the filtered notes list
+export const filteredNotes = derived(
+    [notesList, searchQuery],
+    ([$notes, $query]) => {
+        if (!$query.trim()) return $notes;
 
-        const lowerQuery = query.toLowerCase();
+        const lowerQuery = $query.toLowerCase();
         return $notes.filter(note =>
             note.title.toLowerCase().includes(lowerQuery) ||
-            note.content.toLowerCase().includes(lowerQuery) ||
-            note.tags.some(tag => tag.toLowerCase().includes(lowerQuery))
+            note.content.toLowerCase().includes(lowerQuery)
         );
-    });
-}
+    }
+);
