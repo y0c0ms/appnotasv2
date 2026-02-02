@@ -1,6 +1,7 @@
 <script lang="ts">
     import { settingsStore } from '$lib/stores/settings';
     import { settingsOpen } from '$lib/stores/shortcuts';
+    import { focusArea } from '$lib/stores/focus';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { fade, slide } from 'svelte/transition';
 
@@ -31,15 +32,41 @@
     }
 
     $: settings = $settingsStore;
+
+    let panelElement: HTMLElement;
+    
+    $: if ($focusArea === 'settings' && panelElement) {
+        panelElement.focus();
+    }
 </script>
 
-<div class="settings-panel" transition:slide={{ axis: 'x', duration: 300 }}>
+<div 
+    class="settings-panel" 
+    transition:slide={{ axis: 'x', duration: 300 }}
+    tabindex="0"
+    role="dialog"
+    aria-label="Settings"
+    bind:this={panelElement}
+    on:focus={() => focusArea.set('settings')}
+>
     <div class="settings-header">
         <h2>Settings</h2>
         <button class="close-btn" on:click={close}>✕</button>
     </div>
 
     <div class="settings-content">
+        <section>
+            <h3>General</h3>
+            <div class="setting-item">
+                <span>Run on Startup</span>
+                <label class="switch">
+                    <input type="checkbox" checked={$settingsStore.autostart} on:change={() => settingsStore.toggleAutostart()} />
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <p class="hint">Automatically launch AppNotas when you log in</p>
+        </section>
+
         <section>
             <h3>Editor</h3>
             <div class="setting-item">
@@ -142,6 +169,25 @@
         color: #e0e0e0;
         z-index: 100;
         box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+        outline: none;
+    }
+
+    .settings-content::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .settings-content::-webkit-scrollbar-track {
+        background: #1e1e1e;
+    }
+
+    .settings-content::-webkit-scrollbar-thumb {
+        background: #333;
+        border-radius: 4px;
+        border: 2px solid #1e1e1e;
+    }
+
+    .settings-content::-webkit-scrollbar-thumb:hover {
+        background: #444;
     }
 
     .settings-header {

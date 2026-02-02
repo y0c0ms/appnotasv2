@@ -15,6 +15,7 @@
     "dialog:allow-open",
     "dialog:default",
     "core:webview:allow-set-webview-zoom",
-    "core:path:default"
+    "core:path:default",
+    "autostart:default"
   ]
 }

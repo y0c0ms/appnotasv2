@@ -1,19 +1,17 @@
 import { spawn } from 'child_process';
+import { copyFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
+import { join, resolve } from 'path';
 
 const args = process.argv.slice(2);
 const forceLinux = args.includes('--linux');
-
-// Detect if we are in WSL (even if running Windows Bun binary)
-const isWSL = process.env.WSL_DISTRO_NAME !== undefined ||
-    process.env.PATH?.includes('/mnt/c/') ||
-    process.env.PWD?.includes('/mnt/c/') ||
-    process.env.HOME?.startsWith('/home/');
+const buildAll = args.includes('--all');
 
 const isWindowsPlatform = process.platform === 'win32';
 
-// logic: Build for Linux if we are actually ON linux OR if we explicitly forced it
-const buildLinux = (process.platform === 'linux' || forceLinux);
-const buildWindows = isWindowsPlatform && !forceLinux;
+// Path constants
+const ROOT_DIR = resolve(process.cwd());
+const BUNDLE_DIR = join(ROOT_DIR, 'bundle');
+const SRC_TAURI_TARGET = join(ROOT_DIR, 'src-tauri', 'target', 'release', 'bundle');
 
 async function runCommand(command, args) {
     return new Promise((resolve, reject) => {
@@ -21,7 +19,8 @@ async function runCommand(command, args) {
         console.log(`\n🚀 Running: ${fullCmd}`);
         const proc = spawn(command, args, {
             stdio: 'inherit',
-            shell: true
+            shell: true,
+            cwd: ROOT_DIR
         });
         proc.on('close', (code) => {
             if (code === 0) resolve();
@@ -30,39 +29,76 @@ async function runCommand(command, args) {
     });
 }
 
+function ensureBundleDir() {
+    if (!existsSync(BUNDLE_DIR)) {
+        mkdirSync(BUNDLE_DIR);
+    }
+}
+
+async function copyArtifacts() {
+    console.log('\n📦 Collecting artifacts into /bundle folder...');
+    ensureBundleDir();
+
+    // 1. Copy Windows EXE
+    if (isWindowsPlatform) {
+        const nsisDir = join(SRC_TAURI_TARGET, 'nsis');
+        if (existsSync(nsisDir)) {
+            const files = readdirSync(nsisDir).filter(f => f.endsWith('.exe'));
+            files.forEach(f => {
+                copyFileSync(join(nsisDir, f), join(BUNDLE_DIR, f));
+                console.log(`   ✅ Copied: ${f}`);
+            });
+        }
+    }
+
+    // 2. Copy Linux RPM (Found in same structure if built via WSL, because target is shared usually, 
+    //    BUT WSL might write to a different target if not set up to share. 
+    //    Usually, if running from Windows > WSL, the project dir is mounted.
+    //    So target/release/bundle/rpm should exist here too.)
+    const rpmDir = join(SRC_TAURI_TARGET, 'rpm');
+    if (existsSync(rpmDir)) {
+        const files = readdirSync(rpmDir).filter(f => f.endsWith('.rpm'));
+        files.forEach(f => {
+            copyFileSync(join(rpmDir, f), join(BUNDLE_DIR, f));
+            console.log(`   ✅ Copied: ${f}`);
+        });
+    }
+}
+
 async function build() {
     console.log('📦 Starting AppNotas Packaging Process...');
 
     try {
-        if (buildWindows) {
-            if (isWSL) {
-                console.warn('\n⚠️  Note: Running in WSL with Windows environment.');
-                console.warn('   This will generate a WINDOWS (.exe) installer.');
-                console.warn('   To build for Linux (RPM) instead, run: bun run package:linux');
-            }
-            console.log('\n🪟 Building Windows NSIS Installer...');
+        if (buildAll && isWindowsPlatform) {
+            console.log('\n🔄 Mode: ALL (Windows + Linux/WSL)');
+
+            // 1. Windows Build
+            console.log('\n🪟 [1/2] Building Windows Installer...');
             await runCommand('bun', ['x', 'tauri', 'build', '--bundles', 'nsis']);
-            console.log('\n✅ Windows Build Complete!');
-        } else if (buildLinux) {
+
+            // 2. Linux Build via WSL
+            console.log('\n🐧 [2/2] Building Linux RPM (via WSL)...');
+            // We use 'bun run tauri:build' inside WSL. 
+            // We explicitly pass the target to ensure it knows we want Linux, 
+            // avoiding issues where it might detect Windows from shared envs.
+            await runCommand('wsl', ['bun', 'run', 'tauri', 'build', '--target', 'x86_64-unknown-linux-gnu', '--bundles', 'rpm']);
+
+        } else if (isWindowsPlatform && !forceLinux) {
+            console.log('\n🪟 Building Windows Installer Only...');
+            await runCommand('bun', ['x', 'tauri', 'build', '--bundles', 'nsis']);
+
+        } else if (forceLinux || process.platform === 'linux') {
             console.log('\n🐧 Building Linux Packages...');
-            try {
-                console.log('\n💎 Attempting RPM Build...');
-                await runCommand('bun', ['x', 'tauri', 'build', '--bundles', 'rpm']);
-                console.log('\n✅ RPM Build Complete!');
-            } catch (e) {
-                console.warn('\n⚠️ RPM build failed (usually needs specific tools).');
-                console.log('\n📦 Attempting AppImage and Debian builds...');
-                await runCommand('bun', ['x', 'tauri', 'build', '--bundles', 'appimage,deb']);
-                console.log('\n✅ Linux Bundles Complete!');
-            }
+            await runCommand('bun', ['x', 'tauri', 'build', '--bundles', 'rpm']);
         }
+
+        // Post-build: Collect artifacts
+        await copyArtifacts();
+
+        console.log('\n✨ All builds complete! Check the "bundle" folder.');
+
     } catch (error) {
         console.error(`\n❌ Build failed: ${error.message}`);
-        if (buildLinux) {
-            console.log('\n💡 Linux Troubleshooting:');
-            console.log('   Ensure you have installed: libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm');
-            console.log('   Note: On Ubuntu 24.04+, use "libwebkit2gtk-4.1-dev" instead of "4.0".');
-        }
         process.exit(1);
     }
 }

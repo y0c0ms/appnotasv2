@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 
 export interface AppSettings {
     showEditorMenus: boolean;
@@ -15,6 +16,7 @@ export interface AppSettings {
     aiModelPreference: 'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gemini-2.5-flash-lite';
     zoomLevel: number;
     pinnedNoteIds: string[];
+    autostart: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -35,7 +37,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     lastActiveNoteId: '',
     aiModelPreference: 'gemini-2.5-flash',
     zoomLevel: 1.0,
-    pinnedNoteIds: []
+    pinnedNoteIds: [],
+    autostart: false
 };
 
 function createSettingsStore() {
@@ -47,11 +50,29 @@ function createSettingsStore() {
         update,
         init: async () => {
             try {
+                // 1. Load settings file
                 const settingsJson = await invoke<string>('read_file', { path: '.settings.json' });
+                let loaded: Partial<AppSettings> = {};
                 if (settingsJson) {
-                    const loaded = JSON.parse(settingsJson);
-                    set({ ...DEFAULT_SETTINGS, ...loaded });
+                    loaded = JSON.parse(settingsJson);
                 }
+
+                // 2. Sync with real system autostart state
+                let autostartState = false;
+                try {
+                    autostartState = await isEnabled();
+                    console.log('🔄 System Autostart Status:', autostartState);
+                } catch (e) {
+                    console.warn('Failed to check autostart status:', e);
+                }
+
+                // Merge: defaults < loaded < autostart state (System truth wins)
+                set({
+                    ...DEFAULT_SETTINGS,
+                    ...loaded,
+                    autostart: autostartState
+                });
+
             } catch (err) {
                 console.log('No settings file found, using defaults');
                 // Create default settings file
@@ -78,6 +99,28 @@ function createSettingsStore() {
                 return newSettings;
             });
             settingsStore.save();
+        },
+        toggleAutostart: async () => {
+            const current = get(settingsStore);
+            const newState = !current.autostart;
+
+            try {
+                if (newState) {
+                    await enable();
+                    console.log('✅ Autostart enabled');
+                } else {
+                    await disable();
+                    console.log('🚫 Autostart disabled');
+                }
+
+                settingsStore.update(s => ({ ...s, autostart: newState }));
+                await settingsStore.save();
+
+            } catch (e) {
+                console.error('Failed to toggle autostart:', e);
+                // Revert UI state if system call failed
+                settingsStore.update(s => ({ ...s, autostart: current.autostart }));
+            }
         }
     };
 }

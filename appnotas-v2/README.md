@@ -40,9 +40,14 @@ bun run dev
 AppNotas uses a unified packaging script for generating production-ready installers.
 
 ```bash
-# Build the application for your current platform (EXE on Windows, RPM on Linux)
+# Build for your current platform only
 bun run package
+
+# Build for BOTH Windows and Linux (requires WSL)
+bun run package:all
 ```
+
+**Note**: running `package:all` will automatically collect the `.exe` and `.rpm` files into a `bundle/` folder in the project root.
 
 #### Windows (NSIS)
 The `.exe` installer will be located at:

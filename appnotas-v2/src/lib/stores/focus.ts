@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-export type FocusArea = 'list' | 'editor' | 'file-tabs';
+export type FocusArea = 'list' | 'editor' | 'file-tabs' | 'settings';
 
 export const focusArea = writable<FocusArea>('list');
 

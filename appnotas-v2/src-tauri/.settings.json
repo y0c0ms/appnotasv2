@@ -18,5 +18,6 @@
   "zoomLevel": 1,
   "pinnedNoteIds": [
     "note-20260131-163235-note-jan-31-0432-pm.md"
-  ]
+  ],
+  "autostart": false
 }

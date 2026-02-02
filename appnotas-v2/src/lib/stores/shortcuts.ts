@@ -95,6 +95,13 @@ export function setupGlobalShortcuts() {
         if (e.ctrlKey && e.key === 'ArrowLeft') {
             e.preventDefault();
             const current = get(focusArea);
+
+            // Navigate back from settings
+            if (current === 'settings') {
+                focusArea.set('editor');
+                return;
+            }
+
             let next = prevFocusArea(current);
 
             // Skip file-tabs if not relevant
@@ -114,6 +121,14 @@ export function setupGlobalShortcuts() {
         if (e.ctrlKey && e.key === 'ArrowRight') {
             e.preventDefault();
             const current = get(focusArea);
+
+            // Navigate to settings if open
+            if (current === 'editor' && get(settingsOpen)) {
+                console.log('Ctrl+Right: Entering settings panel');
+                focusArea.set('settings');
+                return;
+            }
+
             let next = nextFocusArea(current);
 
             // Skip file-tabs if not relevant

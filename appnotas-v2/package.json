@@ -16,7 +16,8 @@
 		"tauri:dev": "tauri dev",
 		"tauri:build": "tauri build",
 		"package": "bun run scripts/package.js",
-		"package:linux": "bun run scripts/package.js --linux"
+		"package:linux": "bun run scripts/package.js --linux",
+		"package:all": "bun run scripts/package.js --all"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",
@@ -35,6 +36,7 @@
 	"dependencies": {
 		"@google/generative-ai": "^0.24.1",
 		"@tauri-apps/api": "^2.9.1",
+		"@tauri-apps/plugin-autostart": "^2.5.1",
 		"@tauri-apps/plugin-dialog": "^2.6.0",
 		"@tauri-apps/plugin-fs": "^2.4.5",
 		"@tiptap/core": "^3.18.0",
