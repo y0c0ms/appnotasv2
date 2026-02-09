@@ -45,7 +45,7 @@
     line-height: 1.7;
 }
 
-:global(.tiptap-editor ul),
+:global(.tiptap-editor ul:not([data-type='taskList'])),
 :global(.tiptap-editor ol) {
     padding-left: 2rem;
     margin: 0.75rem 0;
@@ -112,23 +112,69 @@
 }
 
 /* Task Lists */
+/* Task Lists - Aggressive Fix with Explicit Classes */
+:global(.tiptap-editor .tiptap-task-list),
 :global(.tiptap-editor ul[data-type='taskList']) {
-    list-style: none;
-    padding-left: 0.5rem;
+    list-style: none !important;
+    padding: 0 !important;
     margin: 1rem 0;
+    border: 2px solid red !important;
+    /* Debug enabled */
 }
 
-:global(.tiptap-editor ul[data-type='taskList'] li) {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
+:global(.tiptap-editor .tiptap-task-item),
+:global(.tiptap-editor li[data-type='taskItem']) {
+    display: flex !important;
+    align-items: flex-start !important;
     margin: 0.5rem 0;
+    /* Ensure no bullets appear */
+    list-style: none !important;
+    list-style-type: none !important;
+    list-style-image: none !important;
+    /* Extra safety */
 }
 
+/* Force remove markers and pseudo-elements */
+:global(.tiptap-editor .tiptap-task-item::marker),
+:global(.tiptap-editor .tiptap-task-item::before) {
+    display: none !important;
+    content: "" !important;
+}
+
+
+:global(.tiptap-editor .tiptap-task-item label),
 :global(.tiptap-editor ul[data-type='taskList'] li label) {
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    margin-right: 0.75rem;
     margin-top: 0.15rem;
     user-select: none;
+    line-height: 1;
+}
+
+:global(.tiptap-editor .tiptap-task-item > div),
+:global(.tiptap-editor ul[data-type='taskList'] li > div) {
+    flex: 1 1 auto;
+    margin: 0;
+}
+
+/* Fix vertical alignment: Remove margins from paragraphs inside task items */
+:global(.tiptap-editor .tiptap-task-item p),
+:global(.tiptap-editor ul[data-type='taskList'] li p) {
+    margin: 0 !important;
+}
+
+/* Force remove markers, before AND after */
+:global(.tiptap-editor .tiptap-task-item::marker),
+:global(.tiptap-editor .tiptap-task-item::before),
+:global(.tiptap-editor .tiptap-task-item::after),
+:global(.tiptap-editor ul[data-type='taskList'] li::marker),
+:global(.tiptap-editor li[data-type='taskItem']::marker),
+:global(.tiptap-editor ul[data-type='taskList'] li::before),
+:global(.tiptap-editor li[data-type='taskItem']::before),
+:global(.tiptap-editor ul[data-type='taskList'] li::after),
+:global(.tiptap-editor li[data-type='taskItem']::after) {
+    display: none !important;
+    content: "" !important;
 }
 
 :global(.tiptap-editor ul[data-type='taskList'] li input[type='checkbox']) {
@@ -167,6 +213,7 @@
 }
 
 /* Custom Extensions UI */
+/* OLD AI Zone Styles - Keeping for reference but overriding below if needed 
 :global(.ai-improvement-zone) {
     background: rgba(74, 158, 255, 0.1);
     border-radius: 4px;
@@ -174,6 +221,7 @@
     position: relative;
     animation: ai-pulse 2s infinite;
 }
+*/
 
 :global(.ai-zone-spinner) {
     display: inline-block;
@@ -344,4 +392,95 @@
 /* Ensure function calls/methods pop */
 :global(.hljs-function) {
     color: #d2a8ff;
+}
+
+/* AI Proposal Styling */
+:global(.ai-proposal-highlight) {
+    background: rgba(46, 160, 67, 0.2);
+    border-radius: 4px;
+    padding: 2px 0;
+    position: relative;
+    border-bottom: 2px solid rgba(46, 160, 67, 0.5);
+}
+
+:global(.ai-proposal-actions) {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px;
+    margin-left: 8px;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 4px 8px;
+    vertical-align: middle;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+}
+
+:global(.ai-btn) {
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: opacity 0.2s;
+    color: white;
+}
+
+:global(.ai-btn:hover) {
+    opacity: 0.9;
+}
+
+:global(.ai-accept) {
+    background: #238636;
+}
+
+:global(.ai-reject) {
+    background: #da3633;
+}
+
+/* AI Zone (Blocked Text) */
+:global(.ai-improvement-zone) {
+    background-color: rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    user-select: none;
+    filter: blur(2px) grayscale(0.5);
+    transition: all 0.5s ease;
+}
+
+:global(.ai-zone-spinner-widget) {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(30, 30, 30, 0.95);
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid #555;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+    z-index: 99999 !important;
+    /* Force high z-index for Files tab compatibility */
+    pointer-events: none;
+    margin-top: -2.5em;
+    /* Shift up above line */
+    white-space: nowrap;
+}
+
+:global(.ai-zone-spinner-widget)::after {
+    content: "AI Working...";
+    color: #e0e0e0;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+:global(.ai-zone-spinner-widget .spinner) {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #555;
+    border-top-color: #4a9eff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
 }

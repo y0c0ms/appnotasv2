@@ -13,10 +13,11 @@ export interface AppSettings {
     geminiKey: string;
     notesDirectory: string;
     lastActiveNoteId: string;
-    aiModelPreference: 'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gemini-2.5-flash-lite';
+    aiModelPreference: string;
     zoomLevel: number;
     pinnedNoteIds: string[];
     autostart: boolean;
+    defaultShell: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -27,10 +28,20 @@ const DEFAULT_SETTINGS: AppSettings = {
         ctrl3: '#4aff4a'
     },
     keybinds: {
-        'toggleMenus': 'Control+k',
-        'openSettings': 'Control+,',
-        'newNote': 'Control+n',
-        'search': 'Control+f'
+        'openPalette': 'Ctrl+P',
+        'save': 'Ctrl+S',
+        'toggleMenus': 'Ctrl+K',
+        'toggleChecklist': 'Ctrl+L',
+        'openSettings': 'Ctrl+,',
+        'switchTabs': 'Ctrl+Tab',
+        'focusLeft': 'Ctrl+Shift+ArrowLeft',
+        'focusRight': 'Ctrl+Shift+ArrowRight',
+        'zoomIn': 'Ctrl+=',
+        'zoomOut': 'Ctrl+-',
+        'aiTrigger': 'Ctrl+Shift+Enter',
+        'aiAccept': 'Ctrl+Shift+]',
+        'aiReject': 'Ctrl+Shift+[',
+        'toggleTerminal': 'Ctrl+`',
     },
     geminiKey: '',
     notesDirectory: '',
@@ -38,7 +49,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     aiModelPreference: 'gemini-2.5-flash',
     zoomLevel: 1.0,
     pinnedNoteIds: [],
-    autostart: false
+    autostart: false,
+    defaultShell: 'powershell'
 };
 
 function createSettingsStore() {

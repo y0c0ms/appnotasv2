@@ -60,6 +60,7 @@
 
 <NodeViewWrapper>
 	<div class="image-container" style="width: {node.attrs.width ? node.attrs.width + 'px' : 'auto'}; height: {node.attrs.height ? node.attrs.height + 'px' : 'auto'}">
+        <div class="drag-handle" data-drag-handle contenteditable="false" draggable="true"></div>
 		<img 
             src={node.attrs.src} 
             alt={node.attrs.alt} 
@@ -132,4 +133,27 @@
 	.image-container:hover .resizer-handle {
 		opacity: 1;
 	}
+
+    .drag-handle {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 16px;
+        background: #4a9eff;
+        opacity: 0;
+        transition: opacity 0.2s;
+        cursor: grab;
+        z-index: 1000;
+        border-radius: 4px 4px 0 0;
+        pointer-events: auto;
+    }
+    
+    .drag-handle:active {
+        cursor: grabbing;
+    }
+
+    :global(.image-container:hover) .drag-handle {
+        opacity: 1 !important;
+    }
 </style>

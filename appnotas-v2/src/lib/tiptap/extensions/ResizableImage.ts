@@ -5,6 +5,8 @@ import ImageResize from '../../components/tiptap/ImageResize.svelte';
 export const ResizableImage = Image.extend({
     name: 'resizableImage',
 
+    draggable: true,
+
     addAttributes() {
         return {
             ...this.parent?.(),

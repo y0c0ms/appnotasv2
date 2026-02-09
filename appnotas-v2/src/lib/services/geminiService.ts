@@ -3,7 +3,7 @@ import type { Part } from "@google/generative-ai";
 import { get } from "svelte/store";
 import { settingsStore } from "../stores/settings";
 
-export type AIModel = 'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gemini-2.5-flash-lite';
+export type AIModel = string;
 
 export interface AIContent {
     text?: string;
@@ -16,11 +16,16 @@ class GeminiService {
 
     private init() {
         const apiKey = get(settingsStore).geminiKey;
-        if (!apiKey) throw new Error("Gemini API Key not found in settings.");
+        if (!apiKey) {
+            console.error("[GeminiService] No API Key found in settings!");
+            throw new Error("Gemini API Key not found in settings.");
+        }
+        console.log(`[GeminiService] Initializing with key: ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`);
         this.genAI = new GoogleGenerativeAI(apiKey);
     }
 
     async generateResponse(prompt: string, context: AIContent, modelOverride?: AIModel): Promise<string> {
+        console.log(`[GeminiService] Generating response using model: ${modelOverride || 'default'}...`);
         this.init();
         if (!this.genAI) throw new Error("Failed to initialize Gemini AI.");
 
@@ -28,6 +33,7 @@ class GeminiService {
         const modelName = modelOverride || settings.aiModelPreference || 'gemini-2.5-flash';
 
         const model = this.genAI.getGenerativeModel({ model: modelName });
+        console.log(`[GeminiService] Model initialized: ${modelName}`);
 
         const parts: (string | Part)[] = [];
 
@@ -63,9 +69,11 @@ class GeminiService {
         try {
             const result = await model.generateContent(parts);
             const response = await result.response;
-            return response.text();
+            const text = response.text();
+            console.log(`[GeminiService] Response generated successfully (${text.length} chars).`);
+            return text;
         } catch (error) {
-            console.error("Gemini API Error:", error);
+            console.error("[GeminiService] API Error:", error);
             throw new Error(`Failed to get response from ${modelName}. ${error instanceof Error ? error.message : ''}`);
         }
     }
@@ -83,6 +91,45 @@ class GeminiService {
                 mimeType: matches[1]
             }
         };
+    }
+
+    async getAvailableModels(apiKey: string): Promise<string[]> {
+        if (!apiKey) return [];
+        try {
+            console.log(`[GeminiService] Fetching models...`);
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+            if (!response.ok) throw new Error(`Failed to fetch models: ${response.statusText}`);
+
+            const data = await response.json();
+            if (!data.models) return [];
+
+            return data.models
+                .filter((m: any) =>
+                    m.name.includes('gemini') &&
+                    m.supportedGenerationMethods?.includes('generateContent')
+                )
+                .map((m: any) => m.name.replace('models/', ''))
+                .sort();
+        } catch (e) {
+            console.error("[GeminiService] Failed to load models:", e);
+            throw e;
+        }
+    }
+
+    async validateModel(modelName: string): Promise<boolean> {
+        this.init();
+        if (!this.genAI) return false;
+
+        try {
+            console.log(`[GeminiService] Validating model: ${modelName}`);
+            const model = this.genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent("Hello");
+            const response = await result.response;
+            return !!response.text();
+        } catch (e) {
+            console.error("[GeminiService] Model validation failed:", e);
+            throw e;
+        }
     }
 }
 

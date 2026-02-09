@@ -1,10 +1,21 @@
 <script lang="ts">
     import { createEventDispatcher, onMount } from 'svelte';
     import { geminiService, type AIContent } from '../services/geminiService';
-    import { fade, scale } from 'svelte/transition';
+    import { fade, slide, scale } from 'svelte/transition';
+    import type { Editor } from '@tiptap/core';
+    import { currentEditor } from '../stores/editorStore';
+    import { get } from 'svelte/store';
 
-    export let context: AIContent;
-    export let editor: any; // TipTap editor instance
+    // Extended context type that includes full file content
+    interface ExtendedAIContext extends AIContent {
+        fullFileContent?: string;
+        editor?: any; // TipTap instance carrier
+        cmSelectionRange?: { from: number; to: number }; // CodeMirror selection range, pre-captured
+    }
+
+    export let context: ExtendedAIContext;
+    export let editor: any = null; // TipTap editor instance (optional)
+    export let codeMirrorEditor: any = null; // CodeMirror editor instance (optional)
 
     const dispatch = createEventDispatcher();
     let instruction = '';
@@ -13,8 +24,15 @@
 
     let inputElement: HTMLInputElement;
 
+    // Track selection for CodeMirror
+    let cmSelection: { from: number; to: number } | null = null;
+
     onMount(() => {
         if (inputElement) inputElement.focus();
+        // Capture CodeMirror selection at mount time
+        if (codeMirrorEditor) {
+            cmSelection = codeMirrorEditor.getSelection();
+        }
     });
 
     const presets = [
@@ -25,65 +43,153 @@
         { label: 'To List', prompt: 'Turn this text into a well-organized bulleted list.' },
     ];
 
+    let generatedResponse = '';
+    let isReviewing = false;
+
+    $: console.log('[AIPalette] Editor prop updated:', !!editor);
+
     async function submit(customPrompt?: string) {
         const prompt = customPrompt || instruction;
         if (!prompt && !customPrompt) return;
-
-        loading = true;
-        error = '';
-
-        // Capture selection for insertion
-        const { from, to, $from } = editor.state.selection;
-        const isParentCode = $from.parent.type.name === 'codeBlock';
-        const isNodeCode = (editor.state.selection as any).node?.type?.name === 'codeBlock';
-        const inCodeContext = isParentCode || isNodeCode;
-        const mode = editor.options.parentElement?.closest('.file-editor') ? 'code' : 'markdown';
-
-        try {
-            // Set visual progress indicator
-            editor.commands.setAIZone(from, to);
-            
-            // Dispatch close early if we want non-blocking (user can keep editing)
-            const responseP = geminiService.generateResponse(prompt, context);
-            
-            dispatch('close');
-
-            const response = await responseP;
-            
-            // Remove visual progress
-            editor.commands.unsetAIZone();
-
-            // Insert response into editor at original position
-            if (editor) {
-                let finalContent = response;
-                
-                // If we are INSIDE a code block or replacing one
-                if (mode === 'code' || inCodeContext) {
-                    // Strip markdown fences if AI included them
-                    finalContent = response.replace(/^```[a-z]*\n/i, '').replace(/\n```$/i, '');
-                    
-                    if (isNodeCode) {
-                        // If we are replacing the whole node, we should maintain the node type
-                        editor.chain().focus().insertContentAt({ from, to }, { 
-                            type: 'codeBlock', 
-                            content: [{ type: 'text', text: finalContent }] 
-                        }).run();
-                    } else {
-                        // Just text inside existing block
-                        editor.chain().focus().insertContentAt({ from, to }, { type: 'text', text: finalContent }).run();
-                    }
-                } else {
-                    editor.chain().focus().insertContentAt({ from, to }, finalContent).run();
-                }
+        
+        // Use PRE-CAPTURED selection from context (captured when triggerAI was called)
+        // This avoids the issue of focus moving to the AIPalette input and resetting the selection
+        let currentCmSelection: { from: number; to: number } | null = null;
+        if (codeMirrorEditor && context.cmSelectionRange) {
+            currentCmSelection = context.cmSelectionRange;
+            console.log('[AIPalette] Using pre-captured CM selection:', currentCmSelection);
+        }
+        
+        // Resolve TipTap editor ONLY if CodeMirror is NOT present
+        let activeEditor = null;
+        if (!codeMirrorEditor) {
+            const globalEditor = get(currentEditor);
+            const windowEditor = (window as any).tiptapEditor;
+            activeEditor = editor || context.editor || globalEditor || windowEditor;
+            if (!activeEditor) {
+                console.error('[AIPalette] No TipTap editor instance found!');
             }
+        }
+
+        // Build enhanced context with file context
+        let enhancedContext = { ...context };
+        let enhancedPrompt = prompt;
+        
+        // If we have full file content, include it for context
+        if (context.fullFileContent && context.text !== context.fullFileContent) {
+            enhancedPrompt = `Here is the full file for context:\n\`\`\`\n${context.fullFileContent}\n\`\`\`\n\nThe selected code to work on is:\n\`\`\`\n${context.text}\n\`\`\`\n\n${prompt}\n\nRespond ONLY with the modified selected code, not the entire file.`;
+        }
+
+        // 1. Set visual progress indicator (blocking animation)
+        // ONLY use CodeMirror OR TipTap, not both
+        if (codeMirrorEditor && currentCmSelection) {
+            codeMirrorEditor.setAIZone(currentCmSelection.from, currentCmSelection.to);
+        } else if (activeEditor) {
+            const { from, to } = activeEditor.state.selection;
+            activeEditor.commands.setAIZone(from, to);
+        }
+
+        // 2. Close the palette immediately
+        dispatch('close');
+
+        // 3. Run generation in background
+        runBackgroundGeneration(enhancedPrompt, enhancedContext, activeEditor, codeMirrorEditor, currentCmSelection);
+    }
+    
+    // Detached function to handle response insertion
+    async function runBackgroundGeneration(
+        activePrompt: string, 
+        activeContext: ExtendedAIContext, 
+        tiptapEditor: any, 
+        cmEditor: any, 
+        cmSelect: { from: number, to: number } | null
+    ) {
+        try {
+            const response = await geminiService.generateResponse(activePrompt, activeContext);
+            console.log(`[AIPalette] Response received, length: ${response.length}`);
+
+            if (!response.trim()) {
+                console.warn('[AIPalette] Received empty response from AI. Aborting insertion.');
+                loading = false;
+                return;
+            }
+            
+            // Strip markdown fences
+            const finalContent = response.replace(/^```[a-z]*\n/i, '').replace(/\n```$/i, '');
+            
+            // CodeMirror Insertion Logic
+            if (cmEditor) {
+                console.log('[AIPalette] Processing CodeMirror insertion');
+                cmEditor.unsetAIZone();
+                
+                if (cmSelect) {
+                    // Start of selection + length of original text (roughly)
+                    // We need the original text. context.text has it.
+                    cmEditor.insertAIProposalWithRange(finalContent, cmSelect, activeContext.text);
+                } else {
+                    cmEditor.insertAIProposal(finalContent, activeContext.text);
+                }
+                return;
+            }
+
+            // TipTap Insertion Logic
+            console.log('[AIPalette] Processing TipTap insertion. Editor present:', !!tiptapEditor);
+            
+            if (tiptapEditor) {
+                // Find dynamic range from AIZone storage
+                let targetRange = null;
+                try {
+                    const zones = tiptapEditor.storage.aiZone?.zones;
+                    if (zones && zones.length > 0) {
+                        targetRange = zones[0];
+                        console.log('[AIPalette] Found AIZone range via storage:', targetRange);
+                    } else {
+                        console.warn('[AIPalette] No AIZone found in storage, defaulting to cursor');
+                    }
+                } catch (e) {
+                    console.error('[AIPalette] Error accessing AIZone storage:', e);
+                }
+
+                console.log('[AIPalette] Unsetting AIZone and inserting proposal...');
+                tiptapEditor.commands.unsetAIZone();
+
+                if (targetRange) {
+                    console.log('[AIPalette] Inserting proposal at range:', targetRange);
+                    // Pass range explicitly to command to avoid TextSelection errors on block boundaries
+                    const chain = tiptapEditor.chain().insertAIProposal(finalContent, undefined, targetRange);
+                    console.log('[AIPalette] Chain created, running...');
+                    chain.run();
+                } else {
+                    console.log('[AIPalette] Inserting proposal at cursor (fallback)');
+                    const startSize = tiptapEditor.state.doc.textContent.length;
+                    tiptapEditor.chain().focus().insertAIProposal(finalContent).run();
+                    const endSize = tiptapEditor.state.doc.textContent.length;
+                    console.log(`[AIPalette] Insertion complete. Doc size: ${startSize} -> ${endSize} (Diff: ${endSize - startSize})`);
+                }
+                console.log('[AIPalette] Insertion command sent.');
+            } else {
+                console.error('[AIPalette] TipTap editor instance is missing!');
+            }
+
+            // CodeMirror Insertion Logic
+            if (cmEditor && cmSelect) {
+                // Unblock CodeMirror
+                cmEditor.unsetAIZone();
+                
+                // For now use original selection, but we could find the mapped range of the loading zone if we wanted perfection.
+                // Assuming user doesn't edit much while waiting in CodeMirror for now.
+                // TODO: use dynamic range from loading zone module (by exporting a helper in CodeMirrorEditor)
+                cmEditor.insertAIProposal(finalContent, cmSelect);
+            } 
+
         } catch (e) {
-            editor.commands.unsetAIZone();
-            error = e instanceof Error ? e.message : 'AI request failed';
-            console.error(e);
-            // Re-open palette if error? Or show notification.
-            alert(`AI Error: ${error}`);
-        } finally {
-            loading = false;
+            console.error('AI Generation failed', e);
+            if (tiptapEditor) {
+                tiptapEditor.commands.unsetAIZone();
+            }
+            if (cmEditor) {
+                cmEditor.unsetAIZone();
+            }
         }
     }
 
@@ -106,50 +212,57 @@
     tabindex="0"
     aria-label="Close AI Assistant"
 >
-    <div class="ai-palette-modal" transition:scale={{ start: 0.95, duration: 200 }}>
-        <div class="header">
-            <span class="sparkle">✨</span>
-            <h3>Gemini AI Assistant</h3>
-        </div>
+    <div 
+        class="ai-palette-modal"
+        transition:scale={{ duration: 200, start: 0.96 }}
+    >
+        {#if loading}
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <h3>Generating response...</h3>
+                <p>This may take a moment</p>
+            </div>
+        {:else}
+            <div class="header">
+                <span class="sparkle">✨</span>
+                <h3>Gemini AI Assistant</h3>
+            </div>
 
-        <div class="content">
-            {#if context.images?.length || context.drawings?.length}
-                <div class="context-preview">
-                    <span>Including {context.images?.length || 0} images and {context.drawings?.length || 0} drawings as context</span>
-                </div>
-            {/if}
-
-            <div class="input-wrapper">
-                <input 
-                    bind:this={inputElement}
-                    bind:value={instruction}
-                    placeholder="Ask AI to summarize, rewrite, or explain..."
-                    on:keydown={handleKeyDown}
-                    disabled={loading}
-                />
-                {#if loading}
-                    <div class="loader"></div>
-                {:else}
-                    <button class="send-btn" on:click={() => submit()} disabled={!instruction}>➔</button>
+            <div class="content">
+                {#if context.images?.length || context.drawings?.length}
+                    <div class="context-preview">
+                        <span>Including {context.images?.length || 0} images and {context.drawings?.length || 0} drawings as context</span>
+                    </div>
                 {/if}
+
+                <div class="input-wrapper">
+                    <input 
+                        bind:this={inputElement}
+                        bind:value={instruction}
+                        placeholder="Ask AI to summarize, rewrite, or explain..."
+                        on:keydown={handleKeyDown}
+                        disabled={loading}
+                    />
+                    <button class="send-btn" on:click={() => submit()} disabled={!instruction}>➔</button>
+                </div>
+
+                {#if error}
+                    <div class="error-msg">{error}</div>
+                {/if}
+
+                <div class="presets">
+                    {#each presets as preset}
+                        <button class="preset-btn" on:click={() => submit(preset.prompt)} disabled={loading}>
+                            {preset.label}
+                        </button>
+                    {/each}
+                </div>
             </div>
 
-            {#if error}
-                <div class="error-msg">{error}</div>
-            {/if}
-
-            <div class="presets">
-                {#each presets as preset}
-                    <button class="preset-btn" on:click={() => submit(preset.prompt)} disabled={loading}>
-                        {preset.label}
-                    </button>
-                {/each}
+            <div class="footer">
+                <kbd>Enter</kbd> to run • <kbd>Esc</kbd> to cancel
             </div>
-        </div>
-
-        <div class="footer">
-            <kbd>Enter</kbd> to run • <kbd>Esc</kbd> to cancel
-        </div>
+        {/if}
     </div>
 </div>
 
@@ -256,20 +369,6 @@
         cursor: not-allowed;
     }
 
-    .loader {
-        position: absolute;
-        right: 0.75rem;
-        width: 1.25rem;
-        height: 1.25rem;
-        border: 2px solid #4a9eff;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
 
     .error-msg {
         font-size: 0.85rem;
@@ -308,14 +407,53 @@
         background: #252525;
         border-top: 1px solid #333;
         font-size: 0.75rem;
-        color: #666;
+        color: #888;
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
     }
 
-    kbd {
+    .footer kbd {
         background: #333;
-        color: #999;
-        padding: 1px 4px;
-        border-radius: 3px;
+        padding: 0.1rem 0.3rem;
+        border-radius: 4px;
         font-family: inherit;
+        border: 1px solid #444;
     }
+
+    /* Review UI Styles */
+    .loading-state {
+        padding: 3rem 2rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        color: #e0e0e0;
+        text-align: center;
+    }
+
+    .loading-state h3 {
+        margin: 0;
+        font-weight: 500;
+        color: #fff;
+    }
+
+    .loading-state p {
+        margin: 0;
+        color: #888;
+        font-size: 0.9rem;
+    }
+    
+    .loading-state .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #333;
+        border-top: 3px solid #4a9eff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+
+    /* Button variants */
 </style>

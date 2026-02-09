@@ -9,6 +9,8 @@ export const Drawing = Node.create({
 
     atom: true,
 
+    draggable: true,
+
     addAttributes() {
         return {
             lines: {

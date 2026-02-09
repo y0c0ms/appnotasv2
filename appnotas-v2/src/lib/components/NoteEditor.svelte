@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+import { onMount, onDestroy } from 'svelte';
 	import { activeNote, notesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
 	import {
 		colorChangeRequested,
@@ -23,6 +23,7 @@
 	let showCommandPalette = false;
 	let showAIPalette = false;
 	let aiContext: any = null;
+    let aiEditorInstance: any = null;
 
 	onMount(() => {
 		settingsStore.init();
@@ -78,199 +79,165 @@
 		}
 	}
 
-	// Handle title change
-	function handleTitleChange() {
-		if ($activeNote && title !== $activeNote.title) {
-			saveNote();		}
+	// Local state to prevent global store thrashing & enable save-on-switch
+	let localContent = '';
+	let localTitle = '';
+	let currentNoteId = '';
+	let isDirty = false; // Track if we actually have unsaved changes
+
+	// Sync local state when active note changes
+	$: if ($activeNote && $activeNote.id !== currentNoteId) {
+		// If we were editing a note (currentNoteId) and it's dirty, save it NOW
+		if (currentNoteId && isDirty) {
+			saveSpecificNote(currentNoteId, localContent, localTitle);
+		}
+
+		// Now switch context
+		currentNoteId = $activeNote.id;
+		localContent = $activeNote.content;
+		localTitle = $activeNote.title;
+		title = $activeNote.title; // Sync UI title
+		isDirty = false;
+	}
+
+	// Handle title input
+	function handleTitleInput() {
+		localTitle = title;
+		isDirty = true;
+		scheduleSave();
 	}
 
 	// Schedule auto-save
 	function scheduleSave() {
 		clearTimeout(saveTimeout);
 		saveTimeout = setTimeout(() => {
-			saveNote();
+			if (isDirty && currentNoteId) {
+				saveSpecificNote(currentNoteId, localContent, localTitle);
+			}
 		}, 1000);
 	}
 
-	// Save note
-	async function saveNote() {
-		if (!$activeNote) return;
-
-		const updatedNote = {
-			...$activeNote,
-			title,
-			lastModified: new Date()
-		};
-
+	// Save specific note (bypassing activeNote dependency which might have changed)
+	async function saveSpecificNote(id: string, content: string, noteTitle: string) {
 		try {
+			// Find the original note to preserve properties we aren't changing (like tags/colors)
+			const originalNote = $notesList.find(n => n.id === id);
+			if (!originalNote) return;
+
+			const updatedNote = {
+				...originalNote,
+				title: noteTitle,
+				content: content,
+				lastModified: new Date()
+			};
+
 			await saveNoteToFile(updatedNote.id, updatedNote.content);
-			console.log('File-based note auto-saved:', updatedNote.filename || updatedNote.title);
+			console.log('Saved note:', updatedNote.title);
 
 			notesList.update((notes) =>
 				notes.map((n) => (n.id === updatedNote.id ? updatedNote : n))
 			);
+			
+			// If we just saved the currently active note, clear dirty flag
+			if (id === currentNoteId) {
+				isDirty = false;
+			}
 		} catch (e) {
 			console.error('Failed to save note:', e);
 		}
 	}
+	
+	// Legacy function for compatibility if needed, but we prefer saveSpecificNote
+	async function saveNote() {
+		if (currentNoteId) {
+			saveSpecificNote(currentNoteId, localContent, localTitle);
+		}
+	}
 
-	// Handle content update from TipTap
+	// Handle content update from TipTap (Debounced from component)
 	function handleContentUpdate(markdown: string) {
-		if ($activeNote) {
-			notesList.update(notes =>
-				notes.map(n => n.id === $activeNote!.id ? { ...n, content: markdown } : n)
-			);
+		// Only update if content actually changed
+		if (markdown !== localContent) {
+			localContent = markdown; 
+			isDirty = true;
 			scheduleSave();
 		}
 	}
 
-	// Handle code insert
-	async function handleCodeInsert() {
-		const tiptapEditor = editor?.getEditor();
-		if (tiptapEditor) {
-			tiptapEditor.chain().focus().setCodeBlock().run();
+	function handleCodeInsert() {
+		const tiptap = editor.getEditor();
+		if (tiptap) {
+			tiptap.chain().focus().setCodeBlock().run();
 		}
 	}
 
-	// Handle file link
 	async function handleFileLink() {
-		console.log('NoteEditor: triggering file link dialog');
 		try {
-			const result = await openFileDialog({
+			const selected = await openFileDialog({
 				multiple: false,
 				directory: false
 			});
 
-			if (result && editor) {
-				const filepath = result as string;
-				const filename = filepath.split(/[\\/]/).pop() || 'file';
-				
-				// Insert link into editor as a widget node
-				const tiptapEditor = editor.getEditor();
-				if (tiptapEditor) {
-					tiptapEditor
-						.chain()
-						.focus()
-						.setFileLink({ path: filepath, name: filename })
-						.run();
+			if (selected && typeof selected === 'string') {
+				const tiptap = editor.getEditor();
+				if (tiptap) {
+					// Use our custom file-link extension or just text for now
+					tiptap.chain().focus().insertContent({
+						type: 'fileLink',
+						attrs: { path: selected }
+					}).run();
 				}
 			}
-		} catch (error) {
-			console.error('Failed to select file:', error);
+		} catch (err) {
+			console.error('Failed to select file:', err);
 		}
 	}
 
-	// Unified command executor
-	async function handleCommand(command: string) {
-		const tiptapEditor = editor?.getEditor();
-		if (!tiptapEditor) return;
+	function handleCommand(id: string) {
+		const tiptap = editor.getEditor();
+		if (!tiptap) return;
 
-		switch (command) {
+		switch (id) {
 			case 'tasks':
-				tiptapEditor.chain().focus().toggleTaskList().run();
+				tiptap.chain().focus().toggleTaskList().run();
 				break;
-			case 'image':
-				try {
-					const result = await openFileDialog({
-						multiple: false,
-						directory: false,
-						filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
-					});
-					if (result) {
-						tiptapEditor.chain().focus().setImage({ src: convertFileSrc(result as string) }).run();
-					}
-				} catch (e) { console.error('Image upload failed:', e); }
+			case 'heading1':
+				tiptap.chain().focus().toggleHeading({ level: 1 }).run();
+				break;
+			case 'heading2':
+				tiptap.chain().focus().toggleHeading({ level: 2 }).run();
+				break;
+			case 'bullet-list':
+				tiptap.chain().focus().toggleBulletList().run();
+				break;
+			case 'ordered-list':
+				tiptap.chain().focus().toggleOrderedList().run();
+				break;
+			case 'code-block':
+				handleCodeInsert();
+				break;
+			case 'quote':
+				tiptap.chain().focus().toggleBlockquote().run();
+				break;
+			case 'divider':
+				tiptap.chain().focus().setHorizontalRule().run();
 				break;
 			case 'drawing':
-				tiptapEditor.chain().focus().insertContent({ type: 'drawing' }).run();
-				break;
-			case 'style':
-				settingsStore.toggleMenus();
-				break;
-			case 'color':
-				if (args[0]) {
-					tiptapEditor.chain().focus().setMark('textStyle', { color: args[0] }).run();
-				}
-				break;
-			case 'file':
-				handleFileLink();
-				break;
-			case 'code':
-				tiptapEditor.chain().focus().setCodeBlock().run();
+				tiptap.chain().focus().insertContent({
+					type: 'drawing',
+					attrs: { lines: [] }
+				}).run();
 				break;
 		}
 	}
-
-	function handleCodeBlockInsert(event: CustomEvent) {
-		const { code, language } = event.detail;
-		const tiptapEditor = editor?.getEditor();
-		
-		if (tiptapEditor) {
-			tiptapEditor
-				.chain()
-				.focus()
-				.insertContent(`\`\`\`${language}\n${code}\n\`\`\``)
-				.run();
+	
+	// Ensure we save when component unmounts/navigates away
+	onDestroy(() => {
+		if (currentNoteId && isDirty) {
+			console.log('Editor unmounting, saving pending changes...');
+			saveSpecificNote(currentNoteId, localContent, localTitle);
 		}
-	}
-
-
-	// Handle file mention clicks
-	// This function is now exported and can be passed from parent
-	// async function handleFileClick(filepath: string) {
-	// 	const existing = $openFiles.find(f => f.path === filepath);
-	// 	if (existing) {
-	// 		activeFile.set(existing);
-	// 		return;
-	// 	}
-
-	// 	const ext = filepath.split('.').pop()?.toLowerCase() || '';
-		
-	// 	// Special handling for PDFs (binary files)
-	// 	if (ext === 'pdf') {
-	// 		const assetUrl = convertFileSrc(filepath);
-	// 		const newFile = { 
-	// 			name: filepath.split(/[\\/]/).pop() || 'file.pdf', 
-	// 			path: filepath, 
-	// 			content: assetUrl, 
-	// 			language: 'pdf', 
-	// 			modified: false,
-	// 			type: 'pdf' as const
-	// 		};
-			
-	// 		openFiles.update(files => [...files, newFile]);
-	// 		activeFile.set(newFile);
-	// 		return;
-	// 	}
-
-	// 	try {
-	// 		const content = await invoke<string>('read_file', { path: filepath });
-	// 		const langMap: Record<string, string> = { js:'javascript', ts:'typescript', py:'python', rs:'rust', html:'html', css:'css', json:'json', md:'markdown' };
-			
-	// 		const newFile = { 
-	// 			name: filepath.split(/[\\/]/).pop() || 'file', 
-	// 			path: filepath, 
-	// 			content: content || '', 
-	// 			language: langMap[ext] || 'text', 
-	// 			modified: false 
-	// 		};
-			
-	// 		openFiles.update(files => [...files, newFile]);
-	// 		activeFile.set(newFile);
-	// 	} catch (err) {
-	// 		console.error('Failed to open file from link:', err);
-	// 	}
-	// }
-
-
-	onMount(() => {
-		// Listen for code block insert events
-		window.addEventListener('insertCodeBlock', handleCodeBlockInsert as EventListener);
-
-		return () => {
-			window.removeEventListener('insertCodeBlock', handleCodeBlockInsert as EventListener);
-			clearTimeout(saveTimeout);
-		};
+		clearTimeout(saveTimeout);
 	});
 </script>
 
@@ -312,7 +279,7 @@
 {#if showAIPalette && aiContext}
 	<AIPalette 
 		context={aiContext}
-		editor={editor?.getEditor()}
+		editor={aiEditorInstance}
 		on:close={() => (showAIPalette = false)}
 	/>
 {/if}
@@ -325,8 +292,8 @@
 	<input
 		class="note-title"
 		bind:value={title}
-		on:blur={handleTitleChange}
-		on:input={scheduleSave}
+		on:blur={() => isDirty && saveSpecificNote(currentNoteId, localContent, localTitle)}
+		on:input={handleTitleInput}
 		placeholder="Note title..."
 	/>
 
@@ -338,7 +305,14 @@
 					content={$activeNote.content}
 					onUpdate={handleContentUpdate}
 					onCommandTrigger={() => (showCommandPalette = true)}
-					onAITrigger={(ctx) => {
+					onAITrigger={(ctx, editorInst) => {
+                        // Attach editor to context to ensure it arrives
+                        if (editorInst) {
+                            (ctx as any).editor = editorInst;
+                        } else if (editor) {
+                            (ctx as any).editor = editor.getEditor();
+                        }
+
 						aiContext = ctx;
 						showAIPalette = true;
 					}}
@@ -371,7 +345,7 @@
 	}
 
 	.note-editor.focused {
-		box-shadow: inset 0 0 0 1px rgba(74, 158, 239, 0.4);
+		box-shadow: inset 0 0 0 3px #4a9eff, 0 0 15px rgba(74, 158, 255, 0.4);
 	}
 
 	.note-title {

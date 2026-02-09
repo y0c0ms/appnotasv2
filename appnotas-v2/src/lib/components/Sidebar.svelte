@@ -37,9 +37,11 @@
 		height: 100vh;
 		background: #1a1a1a;
 		border-right: 1px solid #2a2a2a;
-		display: flex;
-		flex-direction: column;
+		display: flex; /* Restored */
+		flex-direction: column; /* Restored */
 	}
+
+	/* Removed focus-within to prevent double borders */
 
 	.tabs {
 		display: flex;
@@ -65,7 +67,6 @@
 	.tab.active {
 		background: #2a2a2a;
 		color: #4a9eff;
-		border-bottom: 2px solid #4a9eff;
 	}
 
 	.tab-content {

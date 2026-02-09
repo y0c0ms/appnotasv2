@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { focusArea, nextFocusArea, prevFocusArea } from './focus';
-import { openFiles } from './files';
+import { openFiles, terminalVisible } from './files';
 import { settingsStore } from './settings';
 
 export const commandPaletteOpen = writable(false);
@@ -22,29 +22,74 @@ async function resetZoom() {
     settingsStore.update(s => ({ ...s, zoomLevel: 1.0 }));
 }
 
+/**
+ * Parse a keybind string and check if it matches the keyboard event
+ * Format: "Ctrl+Shift+P", "Ctrl+,", "Alt+Enter", etc.
+ */
+function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
+    if (!keybind) return false;
+
+    const parts = keybind.split('+');
+    const key = parts[parts.length - 1]; // Last part is the key
+    const modifiers = parts.slice(0, -1).map(m => m.toLowerCase());
+
+    // Check modifiers
+    const needsCtrl = modifiers.includes('ctrl') || modifiers.includes('control');
+    const needsShift = modifiers.includes('shift');
+    const needsAlt = modifiers.includes('alt');
+    const needsMeta = modifiers.includes('meta') || modifiers.includes('cmd');
+
+    if (e.ctrlKey !== needsCtrl) return false;
+    if (e.shiftKey !== needsShift) return false;
+    if (e.altKey !== needsAlt) return false;
+    if (e.metaKey !== needsMeta) return false;
+
+    // Check key (case-insensitive except for special keys)
+    const eventKey = e.key.toLowerCase();
+    const bindKey = key.toLowerCase();
+
+    // Handle special key names
+    if (bindKey === 'arrowleft') return eventKey === 'arrowleft';
+    if (bindKey === 'arrowright') return eventKey === 'arrowright';
+    if (bindKey === 'arrowup') return eventKey === 'arrowup';
+    if (bindKey === 'arrowdown') return eventKey === 'arrowdown';
+    if (bindKey === 'enter') return eventKey === 'enter';
+    if (bindKey === 'tab') return eventKey === 'tab';
+    if (bindKey === 'escape') return eventKey === 'escape';
+    if (bindKey === 'backspace') return eventKey === 'backspace';
+    if (bindKey === 'space') return eventKey === ' ';
+
+    return eventKey === bindKey;
+}
+
 export function setupGlobalShortcuts() {
     if (typeof window === 'undefined') return;
 
     console.log('Setting up global shortcuts...');
 
+    // Use capture phase to intercept events before they reach editors
     window.addEventListener('keydown', (e) => {
-        // Ctrl+P - Open command palette
-        if (e.ctrlKey && e.key === 'p') {
+        const keybinds = get(settingsStore).keybinds;
+
+        // Open command palette
+        if (matchesKeybind(e, keybinds.openPalette)) {
             e.preventDefault();
-            console.log('Ctrl+P pressed! Toggling command palette');
+            console.log('Command palette toggled');
             commandPaletteOpen.update((v) => !v);
+            return;
         }
 
-        // Ctrl+S - Save file
-        if (e.ctrlKey && e.key === 's') {
+        // Save file
+        if (matchesKeybind(e, keybinds.save)) {
             e.preventDefault();
-            console.log('Ctrl+S pressed! Saving file');
+            console.log('Save requested');
             saveRequested.set(true);
             setTimeout(() => saveRequested.set(false), 100);
+            return;
         }
 
-        // Ctrl+1/2/3/4/5/0 - Change note color
-        if (e.ctrlKey && ['1', '2', '3', '4', '5', '0'].includes(e.key)) {
+        // Ctrl+1/2/3/4/5/0 - Change note color (hardcoded for simplicity)
+        if (e.ctrlKey && !e.shiftKey && ['1', '2', '3', '4', '5', '0'].includes(e.key)) {
             e.preventDefault();
             const colors: Record<string, string> = {
                 '1': 'red',
@@ -58,116 +103,144 @@ export function setupGlobalShortcuts() {
             console.log('Color change requested:', color);
             colorChangeRequested.set(color);
             setTimeout(() => colorChangeRequested.set(null), 100);
+            return;
         }
 
-        // Ctrl+L - Toggle checklist mode
-        if (e.ctrlKey && e.key === 'l') {
+        // Toggle checklist mode
+        if (matchesKeybind(e, keybinds.toggleChecklist)) {
             e.preventDefault();
-            console.log('Ctrl+L pressed! Toggling checklist mode');
+            console.log('Toggle checklist');
             listModeToggleRequested.set(true);
             setTimeout(() => listModeToggleRequested.set(false), 100);
+            return;
         }
 
-        // Ctrl+K - Toggle editor menus
-        if (e.ctrlKey && e.key === 'k') {
+        // Toggle editor menus
+        if (matchesKeybind(e, keybinds.toggleMenus)) {
             e.preventDefault();
-            console.log('Ctrl+K pressed! Toggling editor menus');
+            console.log('Toggle editor menus');
             const event = new CustomEvent('toggle-editor-menus');
             window.dispatchEvent(event);
+            return;
         }
 
-        // Ctrl+, - Open settings
-        if (e.ctrlKey && e.key === ',') {
+        // Open settings
+        if (matchesKeybind(e, keybinds.openSettings)) {
             e.preventDefault();
-            console.log('Ctrl+, pressed! Opening settings');
+            console.log('Toggle settings');
             settingsOpen.update(v => !v);
+            return;
         }
 
-        // Ctrl+Tab - Switch sidebar tabs
-        if (e.ctrlKey && e.key === 'Tab') {
+        // Switch sidebar tabs
+        if (matchesKeybind(e, keybinds.switchTabs)) {
             e.preventDefault();
             activeTab.update(t => t === 'notes' ? 'files' : 'notes');
             focusArea.set('list');
-            console.log('Ctrl+Tab pressed! Switching sidebar tab and focusing list');
+            console.log('Switched sidebar tab');
+            return;
         }
 
-        // Ctrl+Left - Move focus area left
-        if (e.ctrlKey && e.key === 'ArrowLeft') {
+        // Move focus area left
+        if (matchesKeybind(e, keybinds.focusLeft)) {
             e.preventDefault();
+            e.stopPropagation();
             const current = get(focusArea);
+            const tab = get(activeTab);
+            console.log('[Shortcuts] Focus left triggered, current:', current, 'tab:', tab);
 
-            // Navigate back from settings
             if (current === 'settings') {
-                focusArea.set('editor');
+                focusArea.update(() => 'editor');
                 return;
             }
 
             let next = prevFocusArea(current);
 
-            // Skip file-tabs if not relevant
+            // Convert 'search' placeholder to actual search area based on tab
+            if (next === 'search' as any) {
+                next = tab === 'files' ? 'file-search' : 'note-search';
+            }
+
+            // Skip file-tabs if not on files tab or no files open
             if (next === 'file-tabs') {
-                const tab = get(activeTab);
                 const files = get(openFiles);
                 if (tab !== 'files' || files.length === 0) {
                     next = prevFocusArea(next);
+                    if (next === 'search' as any) {
+                        next = tab === 'files' ? 'file-search' : 'note-search';
+                    }
                 }
             }
 
-            console.log('Ctrl+Left pressed! Moving focus from', current, 'to', next);
+            console.log('[Shortcuts] Focus changing to:', next);
             focusArea.set(next);
+            return;
         }
 
-        // Ctrl+Right - Move focus area right
-        if (e.ctrlKey && e.key === 'ArrowRight') {
+        // Move focus area right
+        if (matchesKeybind(e, keybinds.focusRight)) {
             e.preventDefault();
+            e.stopPropagation();
             const current = get(focusArea);
+            const tab = get(activeTab);
+            console.log('[Shortcuts] Focus right triggered, current:', current, 'tab:', tab);
 
-            // Navigate to settings if open
             if (current === 'editor' && get(settingsOpen)) {
-                console.log('Ctrl+Right: Entering settings panel');
                 focusArea.set('settings');
                 return;
             }
 
             let next = nextFocusArea(current);
 
-            // Skip file-tabs if not relevant
+            // Convert 'search' placeholder to actual search area based on tab
+            if (next === 'search' as any) {
+                next = tab === 'files' ? 'file-search' : 'note-search';
+            }
+
+            // Skip file-tabs if not on files tab or no files open
             if (next === 'file-tabs') {
-                const tab = get(activeTab);
                 const files = get(openFiles);
                 if (tab !== 'files' || files.length === 0) {
                     next = nextFocusArea(next);
+                    if (next === 'search' as any) {
+                        next = tab === 'files' ? 'file-search' : 'note-search';
+                    }
                 }
             }
 
-            console.log('Ctrl+Right pressed! Moving focus from', current, 'to', next);
+            console.log('[Shortcuts] Focus changing to:', next);
             focusArea.set(next);
+            return;
         }
 
-        // Ctrl++ or Ctrl+= - Zoom In
-        if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
+        // Zoom In
+        if (matchesKeybind(e, keybinds.zoomIn)) {
             e.preventDefault();
             updateZoom(0.1);
+            return;
         }
 
-        // Ctrl+- - Zoom Out
-        if (e.ctrlKey && e.key === '-') {
+        // Zoom Out
+        if (matchesKeybind(e, keybinds.zoomOut)) {
             e.preventDefault();
             updateZoom(-0.1);
+            return;
         }
 
-        // Ctrl+0 - Reset Zoom
-        if (e.ctrlKey && e.key === '0') {
+        // Toggle terminal (works on both tabs)
+        if (matchesKeybind(e, keybinds.toggleTerminal)) {
             e.preventDefault();
-            resetZoom();
+            console.log('Toggle terminal');
+            terminalVisible.update(v => !v);
+            return;
         }
 
-        // Escape - Close command palette and settings
+        // Escape - Close command palette and settings (always available)
         if (e.key === 'Escape') {
             commandPaletteOpen.set(false);
             settingsOpen.set(false);
         }
-    });
+    }, { capture: true }); // Capture phase to intercept before editors
 
     console.log('✅ Global shortcuts registered');
 }

@@ -42,32 +42,35 @@
     }
 </script>
 
-<NodeViewWrapper class="code-block-wrapper">
-	<div class="code-block-header">
-		<div class="lang-selector-group">
-            <select class="language-select" value={selectedLanguage} on:change={handleLanguageChange}>
-                <option value="plaintext">Plain Text</option>
-                {#each languages as lang}
-                    <option value={lang}>{lang}</option>
+<NodeViewWrapper>
+    <div class="code-block-wrapper">
+        <div class="drag-handle" data-drag-handle contenteditable="false" draggable="true"></div>
+        <div class="code-block-header">
+            <div class="lang-selector-group">
+                <select class="language-select" value={selectedLanguage} on:change={handleLanguageChange}>
+                    <option value="plaintext">Plain Text</option>
+                    {#each languages as lang}
+                        <option value={lang}>{lang}</option>
+                    {/each}
+                </select>
+            </div>
+            <button class="copy-btn" on:click={copyCode}>
+                {#if copyState === 'Copied!'}
+                    ✓ Copied
+                {:else}
+                    📋 Copy
+                {/if}
+            </button>
+        </div>
+        
+        <div class="code-block-body">
+            <div class="line-numbers" aria-hidden="true">
+                {#each Array(lineCount) as _, i}
+                    <span>{i + 1}</span>
                 {/each}
-            </select>
+            </div>
+            <pre><NodeViewContent as="code" /></pre>
         </div>
-        <button class="copy-btn" on:click={copyCode}>
-            {#if copyState === 'Copied!'}
-                ✓ Copied
-            {:else}
-                📋 Copy
-            {/if}
-        </button>
-	</div>
-    
-    <div class="code-block-body">
-        <div class="line-numbers" aria-hidden="true">
-            {#each Array(lineCount) as _, i}
-                <span>{i + 1}</span>
-            {/each}
-        </div>
-        <pre><NodeViewContent as="code" /></pre>
     </div>
 </NodeViewWrapper>
 
@@ -82,6 +85,7 @@
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 	}
 
+
 	.code-block-header {
 		display: flex;
 		justify-content: space-between;
@@ -91,6 +95,31 @@
 		border-bottom: 1px solid #30363d;
         user-select: none;
 	}
+    
+    .drag-handle {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 16px; /* Even taller for testing */
+        background: #4a9eff;
+        opacity: 0; /* Let's keep it hidden by default to avoid ugliness, relying on hover */
+        transition: opacity 0.2s;
+        cursor: grab;
+        z-index: 1000;
+        border-radius: 8px 8px 0 0;
+        pointer-events: auto;
+    }
+
+    /* Force visibility on hover */
+    :global(.code-block-wrapper:hover) .drag-handle {
+        opacity: 1 !important;
+    }
+
+
+    .drag-handle:active {
+        cursor: grabbing;
+    }
     
     .lang-selector-group {
         display: flex;

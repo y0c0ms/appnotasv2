@@ -21,7 +21,16 @@
 		if (index !== -1) selectedIndex = index;
 	}
 
-	// Auto-focus container or search when focusArea switches to 'list'
+	// Auto-focus search input when focusArea is 'note-search'
+	$: if ($focusArea === 'note-search' && searchInput) {
+		tick().then(() => {
+			if (document.activeElement !== searchInput) {
+				searchInput.focus();
+			}
+		});
+	}
+
+	// Auto-focus container when focusArea switches to 'list'
 	$: if ($focusArea === 'list' && listContainer) {
 		tick().then(() => {
 			if (document.activeElement !== listContainer && document.activeElement !== searchInput) {
@@ -66,10 +75,22 @@
 	<div class="search-box">
 		<input 
 			type="text" 
-			placeholder="Search notes..." 
+			class:focused={$focusArea === 'note-search'}
+			placeholder="🔍 Search notes..." 
 			bind:value={$searchQuery}
 			bind:this={searchInput}
-			on:focus={() => focusArea.set('list')}
+			on:focus={() => focusArea.set('note-search')}
+			on:keydown|stopPropagation={(e) => {
+				if (e.key === 'Escape') {
+					searchQuery.set('');
+					focusArea.set('list');
+					listContainer.focus();
+				} else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+					e.preventDefault();
+					focusArea.set('list');
+					listContainer.focus();
+				}
+			}}
 		/>
 	</div>
 
@@ -126,12 +147,18 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		background: #1a1a1a;
+		gap: 2px;
 	}
 
 	.search-box {
 		padding: 0.5rem;
-		border-bottom: 1px solid #2a2a2a;
+		background: #1a1a1a;
+		border: 2px solid transparent;
+		transition: border-color 0.15s ease;
+		box-sizing: border-box;
 	}
+
 
 	.search-box input {
 		width: 100%;
@@ -141,18 +168,29 @@
 		border-radius: 4px;
 		color: #fff;
 		font-size: 0.8rem;
+		outline: none;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
+		box-sizing: border-box;
 	}
 
-	.search-box input:focus {
-		outline: none;
+	.search-box input:focus,
+	.search-box input.focused {
 		border-color: #4a9eff;
-        box-shadow: 0 0 10px rgba(74, 158, 255, 0.2);
+		box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3);
 	}
 
 	.notes-list {
 		flex: 1;
 		overflow-y: auto;
 		scrollbar-width: thin;
+		background: #1a1a1a;
+		border: 2px solid transparent;
+		transition: border-color 0.15s ease;
+		box-sizing: border-box;
+	}
+
+	.notes-list.focused {
+		border-color: #4a9eff;
 	}
 
 	.note-item {
@@ -266,8 +304,4 @@
 		background: rgba(255, 255, 255, 0.1);
 	}
     
-    .note-item.pinned .pin-toggle {
-        opacity: 1;
-        color: #4a9eff;
-    }
 </style>

@@ -1,5 +1,5 @@
 {
-  "showEditorMenus": false,
+  "showEditorMenus": true,
   "customColors": {
     "ctrl1": "#ff4a4a",
     "ctrl2": "#4a9eff",
@@ -7,17 +7,28 @@
   },
   "keybinds": {
     "toggleMenus": "Control+k",
-    "openSettings": "Control+,",
+    "openSettings": "Ctrl+.",
     "newNote": "Control+n",
-    "search": "Control+f"
+    "search": "Control+f",
+    "focusLeft": "Ctrl+Shift+ArrowLeft",
+    "focusRight": "Ctrl+Shift+ArrowRight",
+    "toggleTerminal": "Ctrl+,",
+    "zoomIn": "Ctrl+=",
+    "zoomOut": "Ctrl+-",
+    "save": "Ctrl+S",
+    "toggleChecklist": "Ctrl+L",
+    "openPalette": "Ctrl+P",
+    "switchTabs": "Ctrl+Tab",
+    "aiTrigger": "Ctrl+T"
   },
-  "geminiKey": "AIzaSyAab04UzkozY9miMCbKZqw9rbZ2t3wEmFE",
+  "geminiKey": "AIzaSyCVzb0RSGGTawg58bxFJDQrIQFS7CEJOLM",
   "notesDirectory": "C:\\Users\\Utilizador\\Documents\\notes",
   "lastActiveNoteId": "note-20260131-163235-note-jan-31-0432-pm.md",
-  "aiModelPreference": "gemini-2.5-flash",
+  "aiModelPreference": "gemini-flash-latest",
   "zoomLevel": 1,
   "pinnedNoteIds": [
     "note-20260131-163235-note-jan-31-0432-pm.md"
   ],
-  "autostart": false
+  "autostart": false,
+  "defaultShell": "gitbash"
 }

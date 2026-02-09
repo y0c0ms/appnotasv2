@@ -14,10 +14,11 @@
 		saveNoteToFile,
 		deleteNoteFile
 	} from '$lib/stores/notes';
-	import { openFiles, activeFile, currentDirectory } from '$lib/stores/files';
+	import { openFiles, activeFile, currentDirectory, terminalVisible, terminalHeight } from '$lib/stores/files';
 	import { commandPaletteOpen, setupGlobalShortcuts, settingsOpen, activeTab } from '$lib/stores/shortcuts';
 	import { focusArea } from '$lib/stores/focus';
 	import { settingsStore } from '$lib/stores/settings';
+    import { aiState } from '$lib/stores/ai';
 	import type { Note } from '$lib/stores/notes';
 	import type { OpenFile } from '$lib/stores/files';
 
@@ -27,6 +28,7 @@
 	import NoteEditor from '$lib/components/NoteEditor.svelte';
 	import PDFView from '$lib/components/PDFView.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+	import Terminal from '$lib/components/Terminal.svelte';
 	import { detectLanguage } from '$lib/utils/files';
 
 	let loading = true;
@@ -277,6 +279,27 @@
 			activeFile.set(get(openFiles)[0] || null);
 		}
 	}
+
+	// Terminal resize handler
+	function startTerminalResize(event: MouseEvent) {
+		event.preventDefault();
+		const startY = event.clientY;
+		const startHeight = $terminalHeight;
+
+		function onMouseMove(e: MouseEvent) {
+			const deltaY = startY - e.clientY;
+			const newHeight = Math.max(100, Math.min(500, startHeight + deltaY));
+			terminalHeight.set(newHeight);
+		}
+
+		function onMouseUp() {
+			document.removeEventListener('mousemove', onMouseMove);
+			document.removeEventListener('mouseup', onMouseUp);
+		}
+
+		document.addEventListener('mousemove', onMouseMove);
+		document.addEventListener('mouseup', onMouseUp);
+	}
 </script>
 
 
@@ -286,8 +309,22 @@
 	<div class="main-grid" class:show-settings={$settingsOpen}>
 		<div class="editor-section">
 			<header>
-				<h1></h1>
+				<h1>AppNotas</h1>
 				<div class="header-actions">
+					{#if $aiState.pendingProposals > 0}
+						<div class="ai-counter" title="Pending AI Proposals">
+							<span class="count">{$aiState.pendingProposals}</span>
+							<span class="icon">✨</span>
+						</div>
+					{/if}
+					<button 
+						class="btn-icon terminal-toggle" 
+						class:active={$terminalVisible}
+						on:click={() => terminalVisible.update(v => !v)} 
+						title="Toggle Terminal (Ctrl+`)"
+					>
+						&gt;_
+					</button>
 					<button class="btn-icon" on:click={() => settingsOpen.update(v => !v)} title="Settings (Ctrl+,)">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<circle cx="12" cy="12" r="3"></circle>
@@ -389,6 +426,24 @@
 						{/if}
 					{/if}
 				</div>
+
+				<!-- Global Terminal (works on both tabs) -->
+				{#if $terminalVisible}
+					<div 
+						class="terminal-container" 
+						style="height: {$terminalHeight}px;"
+					>
+						<button 
+							class="terminal-resize-handle"
+							on:mousedown={startTerminalResize}
+							aria-label="Resize Terminal"
+						></button>
+						<Terminal 
+							cwd={$activeTab === 'files' ? $currentDirectory : ($notesDirectory || '')} 
+							visible={true} 
+						/>
+					</div>
+				{/if}
 			{/if}
 		</div>
 
@@ -412,9 +467,8 @@
 	}
 
 	/* Specific focus indicators for navigation areas */
-	:global(.content-tabs:focus-within), 
-	:global(.sidebar:focus-within) {
-		box-shadow: inset 0 0 0 1px rgba(74, 158, 239, 0.4) !important;
+	:global(.content-tabs:focus-within) {
+		box-shadow: inset 0 0 0 2px #4a9eff !important; /* Stronger focus indicator */
 	}
 
 	.app {
@@ -468,6 +522,30 @@
 		gap: 0.75rem;
 	}
 
+	.terminal-toggle {
+		font-family: 'Fira Code', monospace;
+		font-weight: 700;
+		font-size: 1rem;
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 4px;
+		color: #888;
+		transition: all 0.2s;
+	}
+
+	.terminal-toggle.active {
+		color: #4a9eff;
+		background: rgba(74, 158, 255, 0.1);
+	}
+
+	.terminal-toggle:hover {
+		color: #ccc;
+		background: #2a2a2a;
+	}
+
 	.btn-primary {
 		padding: 0.5rem 1rem;
 		border-radius: 4px;
@@ -495,7 +573,7 @@
 	}
 
 	.content-tabs.focused {
-		box-shadow: inset 0 0 0 1px rgba(74, 158, 239, 0.4);
+		box-shadow: inset 0 0 0 3px #4a9eff, 0 0 15px rgba(74, 158, 255, 0.4);
 	}
 
 	.tabs-scroll {
@@ -622,5 +700,59 @@
 	.btn-icon:hover {
 		background: #21262d;
 		color: #fff;
+	}
+
+    .ai-counter {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.2rem 0.6rem;
+        background: rgba(74, 158, 255, 0.2);
+        border: 1px solid rgba(74, 158, 255, 0.4);
+        border-radius: 12px;
+        font-size: 0.8rem;
+        color: #4a9eff;
+        margin-right: 0.5rem;
+        animation: pulse 2s infinite;
+    }
+
+    .ai-counter .count {
+        font-weight: bold;
+    }
+
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(74, 158, 255, 0.4); }
+        70% { box-shadow: 0 0 0 4px rgba(74, 158, 255, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(74, 158, 255, 0); }
+    }
+
+	/* Terminal Container */
+	.terminal-container {
+		position: relative;
+		width: 100%;
+		flex-shrink: 0;
+		border-top: 1px solid #30363d;
+		background: #0d1117;
+	}
+
+	.terminal-resize-handle {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 6px;
+		cursor: ns-resize;
+		background: transparent;
+		z-index: 10;
+		transition: background 0.15s ease;
+	}
+
+	.terminal-resize-handle:hover,
+	.terminal-resize-handle:active {
+		background: rgba(74, 158, 255, 0.3);
+	}
+
+	.terminal-container :global(.terminal-wrapper) {
+		height: 100%;
 	}
 </style>

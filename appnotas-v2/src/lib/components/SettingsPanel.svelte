@@ -2,8 +2,129 @@
     import { settingsStore } from '$lib/stores/settings';
     import { settingsOpen } from '$lib/stores/shortcuts';
     import { focusArea } from '$lib/stores/focus';
-    import { open as openDialog } from '@tauri-apps/plugin-dialog';
+    import { open as openDialog, message } from '@tauri-apps/plugin-dialog';
     import { fade, slide } from 'svelte/transition';
+    import { geminiService } from '../services/geminiService';
+    import { onMount } from 'svelte';
+
+    // Shortcut names for display
+    const shortcutNames: Record<string, string> = {
+        'openPalette': 'Open Palette',
+        'save': 'Save',
+        'toggleMenus': 'Toggle Menus',
+        'toggleChecklist': 'Toggle Checklist',
+        'openSettings': 'Settings',
+        'switchTabs': 'Switch Tabs',
+        'focusLeft': 'Focus Left',
+        'focusRight': 'Focus Right',
+        'zoomIn': 'Zoom In',
+        'zoomOut': 'Zoom Out',
+        'aiTrigger': 'AI Trigger',
+        'toggleTerminal': 'Toggle Terminal',
+    };
+
+    let recordingShortcut: string | null = null;
+    let availableModels: string[] = ['gemini-2.5-flash'];
+    let isLoadingModels = false;
+    let isTestingModel = false;
+    let modelFetchTimeout: ReturnType<typeof setTimeout>;
+
+    onMount(() => {
+        loadModels();
+    });
+
+    async function loadModels() {
+        const apiKey = $settingsStore.geminiKey;
+        if (!apiKey) return;
+        
+        isLoadingModels = true;
+        try {
+            const models = await geminiService.getAvailableModels(apiKey);
+            if (models.length > 0) {
+                availableModels = models;
+                // If current pref is not in list (and not empty), maybe keep it or warn?
+                // For now we just add it to list if handled by backend, but here we strictly list what api returns.
+                // But we should ensure at least the current pref is valid or fallback?
+            }
+        } catch (e) {
+            console.error('Failed to load models:', e);
+        } finally {
+            isLoadingModels = false;
+        }
+    }
+
+    async function testConfiguration() {
+        const apiKey = $settingsStore.geminiKey;
+        const model = $settingsStore.aiModelPreference;
+        
+        if (!apiKey) {
+            await message('Please enter an API Key first.', { title: 'Configuration Error', kind: 'error' });
+            return;
+        }
+
+        isTestingModel = true;
+        try {
+            const success = await geminiService.validateModel(model);
+            if (success) {
+                await message(`Successfully connected to ${model}!`, { title: 'Configuration Verified', kind: 'info' });
+            } else {
+                await message(`Failed to verify ${model}. Check logs for details.`, { title: 'Verification Failed', kind: 'error' });
+            }
+        } catch (e) {
+            await message(`Error validating configuration: ${e instanceof Error ? e.message : String(e)}`, { title: 'Error', kind: 'error' });
+        } finally {
+            isTestingModel = false;
+        }
+    }
+
+    function handleKeyChange() {
+        save();
+        clearTimeout(modelFetchTimeout);
+        modelFetchTimeout = setTimeout(() => {
+             loadModels();
+        }, 1000);
+    }
+
+    function startRecording(key: string) {
+        recordingShortcut = key;
+    }
+
+    function captureKey(e: KeyboardEvent, key: string) {
+        // Ignore modifier-only presses
+        if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+        
+        // Allow Escape to cancel
+        if (e.key === 'Escape') {
+            recordingShortcut = null;
+            return;
+        }
+
+        e.preventDefault();
+
+        // Build keybind string
+        const parts: string[] = [];
+        if (e.ctrlKey) parts.push('Ctrl');
+        if (e.shiftKey) parts.push('Shift');
+        if (e.altKey) parts.push('Alt');
+        if (e.metaKey) parts.push('Meta');
+        
+        // Normalize key name
+        let keyName = e.key;
+        if (keyName === ' ') keyName = 'Space';
+        if (keyName.length === 1) keyName = keyName.toUpperCase();
+        
+        parts.push(keyName);
+        const newKeybind = parts.join('+');
+        
+        // Update settings
+        settingsStore.update(s => ({
+            ...s,
+            keybinds: { ...s.keybinds, [key]: newKeybind }
+        }));
+        settingsStore.save();
+        
+        recordingShortcut = null;
+    }
 
     async function selectDirectory() {
         try {
@@ -121,35 +242,78 @@
                     type="password" 
                     placeholder="Enter your Gemini key..." 
                     bind:value={$settingsStore.geminiKey} 
-                    on:blur={save}
+                    on:input={handleKeyChange}
                     class="text-input"
                 />
             </div>
             <div class="setting-item column" style="margin-top: 1rem;">
-                <label for="model-pref">Model Preference</label>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label for="model-pref">Model Preference</label>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        {#if isLoadingModels}
+                            <span class="loading-text">Loading models...</span>
+                        {/if}
+                        <button class="btn-secondary small" on:click={testConfiguration} disabled={isTestingModel}>
+                            {isTestingModel ? 'Testing...' : 'Test Config'}
+                        </button>
+                    </div>
+                </div>
                 <select 
                     id="model-pref"
                     bind:value={$settingsStore.aiModelPreference} 
                     on:change={save}
                     class="text-input select-input"
+                    disabled={isLoadingModels}
                 >
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Balanced)</option>
-                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Powerful)</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Fast)</option>
+                    {#if availableModels.length === 0}
+                         <option value="gemini-2.5-flash">Default (Gemini 2.5 Flash)</option>
+                    {/if}
+                    {#each availableModels as model}
+                        <option value={model}>{model}</option>
+                    {/each}
+                </select>
+            </div>
+            <div class="setting-item column" style="margin-top: 1rem;">
+                <label for="shell-pref">Default Terminal Shell</label>
+                <select 
+                    id="shell-pref"
+                    bind:value={$settingsStore.defaultShell} 
+                    on:change={save}
+                    class="text-input select-input"
+                >
+                    <option value="powershell">PowerShell</option>
+                    <option value="cmd">Command Prompt</option>
+                    <option value="gitbash">Git Bash</option>
+                    <option value="wsl">WSL (Ubuntu)</option>
+                    <option value="bash">Bash (Unix/Linux)</option>
+                    <option value="zsh">Zsh (Unix/Linux)</option>
                 </select>
             </div>
             <p class="hint">Recommended hierarchy: Flash > Pro > Flash Lite</p>
         </section>
 
         <section>
-            <h3>Shortcuts</h3>
-            <ul class="shortcut-list">
-                <li><span>Open Palette</span> <kbd>Ctrl+P</kbd></li>
-                <li><span>Toggle Menus</span> <kbd>Ctrl+K</kbd></li>
-                <li><span>Checklist</span> <kbd>Ctrl+L</kbd></li>
-                <li><span>Save Note</span> <kbd>Ctrl+S</kbd></li>
-                <li><span>Settings</span> <kbd>Ctrl+,</kbd></li>
-            </ul>
+            <h3>Keyboard Shortcuts</h3>
+            <p class="hint">Click a shortcut to change it. Press your new key combination.</p>
+            <div class="shortcuts-editor">
+                {#each Object.entries(shortcutNames) as [key, label]}
+                    <div class="shortcut-row">
+                        <span class="shortcut-label">{label}</span>
+                        <button 
+                            class="shortcut-key" 
+                            class:recording={recordingShortcut === key}
+                            on:click={() => startRecording(key)}
+                            on:keydown|stopPropagation={(e) => recordingShortcut === key && captureKey(e, key)}
+                        >
+                            {#if recordingShortcut === key}
+                                <span class="recording-indicator">Press keys...</span>
+                            {:else}
+                                {$settingsStore.keybinds[key] || 'Not set'}
+                            {/if}
+                        </button>
+                    </div>
+                {/each}
+            </div>
         </section>
     </div>
 
@@ -160,14 +324,17 @@
 
 <style>
     .settings-panel {
+        position: fixed; /* Changed from relative/flex item to fixed overlay */
+        top: 0;
+        right: 0;
+        bottom: 0;
         width: 350px;
-        height: 100%;
         background: #1e1e1e;
         border-left: 1px solid #333;
         display: flex;
         flex-direction: column;
         color: #e0e0e0;
-        z-index: 100;
+        z-index: 1000; /* Increased z-index */
         box-shadow: -4px 0 20px rgba(0,0,0,0.3);
         outline: none;
     }
@@ -228,6 +395,8 @@
         display: flex;
         flex-direction: column;
         gap: 2rem;
+        height: 100%; /* Explicit height */
+        box-sizing: border-box;
     }
 
     section h3 {
@@ -273,6 +442,34 @@
 
     .text-input:focus {
         border-color: #4a9eff;
+    }
+
+    .btn-secondary {
+        background: #21262d;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.2s;
+    }
+
+    .btn-secondary:hover {
+        background: #30363d;
+        border-color: #8b949e;
+        color: #fff;
+    }
+
+    .btn-secondary.small {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.8rem;
+    }
+
+    .loading-text {
+        font-size: 0.8rem;
+        color: #8b949e;
+        margin-right: 0.5rem;
     }
 
     .dir-picker {
@@ -340,29 +537,60 @@
         cursor: pointer;
     }
 
-    .shortcut-list {
-        list-style: none;
-        padding: 0;
-        margin: 0;
+    /* Shortcuts Editor */
+    .shortcuts-editor {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
     }
 
-    .shortcut-list li {
+    .shortcut-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.6rem 0;
+        padding: 0.5rem 0;
         border-bottom: 1px solid #2a2a2a;
-        font-size: 0.9rem;
     }
 
-    .shortcut-list kbd {
+    .shortcut-label {
+        font-size: 0.9rem;
+        color: #ccc;
+    }
+
+    .shortcut-key {
+        padding: 0.4rem 0.8rem;
         background: #333;
-        color: #fff;
-        padding: 2px 6px;
+        border: 1px solid #444;
         border-radius: 4px;
+        color: #fff;
         font-size: 0.75rem;
         font-family: 'Fira Code', monospace;
-        box-shadow: 0 2px 0 #000;
+        cursor: pointer;
+        transition: all 0.2s;
+        min-width: 100px;
+        text-align: center;
+    }
+
+    .shortcut-key:hover {
+        background: #3a3a3a;
+        border-color: #4a9eff;
+    }
+
+    .shortcut-key.recording {
+        background: #2d3a4f;
+        border-color: #4a9eff;
+        box-shadow: 0 0 8px rgba(74, 158, 255, 0.4);
+        animation: pulse 1s infinite;
+    }
+
+    .recording-indicator {
+        color: #4a9eff;
+        font-style: italic;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
     }
 
     /* Switch styling */

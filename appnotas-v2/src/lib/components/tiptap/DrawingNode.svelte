@@ -138,6 +138,7 @@
         bind:this={container}
         style="width: {width}px;"
     >
+        <div class="drag-handle" data-drag-handle contenteditable="false" draggable="true"></div>
         <div class="drawing-container" style="height: {height}px;">
             <canvas
                 bind:this={canvas}
@@ -167,11 +168,6 @@
 </NodeViewWrapper>
 
 <style>
-    .drawing-node-wrapper {
-        margin: 2rem 0;
-        display: flex;
-        justify-content: center;
-    }
 
     .drawing-node {
         position: relative;
@@ -225,5 +221,28 @@
     .drawing-resize-handle.tl {
         top: -6px;
         left: -6px;
+    }
+
+    .drag-handle {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 16px;
+        background: #4a9eff;
+        opacity: 0;
+        transition: opacity 0.2s;
+        cursor: grab;
+        z-index: 1000;
+        border-radius: 12px 12px 0 0;
+        pointer-events: auto;
+    }
+    
+    .drag-handle:active {
+        cursor: grabbing;
+    }
+
+    :global(.drawing-node:hover) .drag-handle {
+        opacity: 1 !important;
     }
 </style>

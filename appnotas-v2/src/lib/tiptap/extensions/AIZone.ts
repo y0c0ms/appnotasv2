@@ -36,6 +36,7 @@ export const AIZone = Extension.create<AIZoneOptions>({
         return {
             setAIZone: (from: number, to: number) => ({ tr, dispatch }) => {
                 if (dispatch) {
+
                     this.storage.zones = [{ from, to }];
                     tr.setMeta('aiZone', { from, to });
                 }
@@ -53,10 +54,11 @@ export const AIZone = Extension.create<AIZoneOptions>({
 
     addProseMirrorPlugins() {
         const { HTMLAttributes } = this.options;
+        const pluginKey = new PluginKey('aiZone');
 
         return [
             new Plugin({
-                key: new PluginKey('aiZone'),
+                key: pluginKey,
                 state: {
                     init() {
                         return DecorationSet.empty;
@@ -76,12 +78,6 @@ export const AIZone = Extension.create<AIZoneOptions>({
                                 Decoration.inline(from, to, {
                                     class: HTMLAttributes.class,
                                 }),
-                                Decoration.widget(from, () => {
-                                    const span = document.createElement('span');
-                                    span.className = 'ai-zone-spinner';
-                                    span.innerHTML = '✨';
-                                    return span;
-                                })
                             ];
                             return DecorationSet.create(tr.doc, decos);
                         }
@@ -91,7 +87,9 @@ export const AIZone = Extension.create<AIZoneOptions>({
                 },
                 props: {
                     decorations(state) {
-                        return this.getState(state);
+                        const decos = pluginKey.getState(state);
+
+                        return decos;
                     },
                 },
             }),
