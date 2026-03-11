@@ -1,6 +1,7 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { Slice } from '@tiptap/pm/model';
 import { setPendingProposals } from '$lib/stores/ai';
 
 export interface AIProposalOptions {
@@ -32,8 +33,7 @@ export const AIProposal = Extension.create<AIProposalOptions>({
         return {
             insertAIProposal: (content: string, originalContent?: string, range?: any) => ({ tr, dispatch, state }) => {
                 if (dispatch) {
-                    // console.log('[AIProposal] Inserting proposal:', content.substring(0, 20) + '...');
-                    let from, to;
+                    let from: number, to: number;
 
                     if (range) {
                         from = range.from;
@@ -43,12 +43,14 @@ export const AIProposal = Extension.create<AIProposalOptions>({
                         to = state.selection.to;
                     }
 
-                    const originalText = originalContent !== undefined ? originalContent : state.doc.textBetween(from, to, '\n');
+                    // Save original content as a ProseMirror Slice (preserves task lists, headings, etc.)
+                    const originalSlice = state.doc.slice(from, to);
+                    const originalSliceJSON = JSON.stringify(originalSlice.toJSON());
 
-                    // Replace content
+                    // Insert the AI response as plain text (reliable insertion)
+                    // The key fix is in REJECT where we restore the structured Slice
                     tr.insertText(content, from, to);
 
-                    // Add proposal metadata
                     const newTo = from + content.length;
                     const id = Math.random().toString(36).substr(2, 9);
 
@@ -59,46 +61,41 @@ export const AIProposal = Extension.create<AIProposalOptions>({
                         id,
                         from,
                         to: newTo,
-                        originalText
+                        originalSliceJSON
                     });
                 }
                 return true;
             },
             acceptAIProposal: () => ({ tr, dispatch, state }) => {
-                // console.log('[AIProposal] Accepting proposal');
-                const proposal = this.storage.proposals.find((p: any) => p.from <= state.selection.from && p.to >= state.selection.to);
+                const findProposal = (p: any) =>
+                    (p.from <= state.selection.from && p.to >= state.selection.to) ||
+                    (state.selection.from >= p.from && state.selection.from <= p.to) ||
+                    (p.from >= state.selection.from && p.to <= state.selection.to);
+
+                const proposal = this.storage.proposals.find(findProposal);
                 if (proposal && dispatch) {
                     tr.setMeta('aiProposal', { action: 'accept', id: proposal.id });
                     return true;
                 }
-                // Try finding any proposal if selection is inside
-                const anyProposal = this.storage.proposals.find((p: any) =>
-                    (state.selection.from >= p.from && state.selection.from <= p.to) ||
-                    (p.from >= state.selection.from && p.to <= state.selection.to)
-                );
-                if (anyProposal && dispatch) {
-                    tr.setMeta('aiProposal', { action: 'accept', id: anyProposal.id });
-                    return true;
-                }
                 return false;
             },
-            rejectAIProposal: () => ({ tr, dispatch, state }) => {
-                const proposal = this.storage.proposals.find((p: any) => p.from <= state.selection.from && p.to >= state.selection.to);
+            rejectAIProposal: () => ({ tr, dispatch, state, editor }) => {
+                const findProposal = (p: any) =>
+                    (p.from <= state.selection.from && p.to >= state.selection.to) ||
+                    (state.selection.from >= p.from && state.selection.from <= p.to) ||
+                    (p.from >= state.selection.from && p.to <= state.selection.to);
+
+                const proposal = this.storage.proposals.find(findProposal);
                 if (proposal && dispatch) {
-                    // Revert text
-                    tr.insertText(proposal.originalText, proposal.from, proposal.to);
+                    // Restore original content from saved ProseMirror Slice (preserves structure!)
+                    try {
+                        const sliceJSON = JSON.parse(proposal.originalSliceJSON);
+                        const originalSlice = Slice.fromJSON(editor.schema, sliceJSON);
+                        tr.replace(proposal.from, proposal.to, originalSlice);
+                    } catch (e) {
+                        console.error('[AIProposal] Failed to restore from slice:', e);
+                    }
                     tr.setMeta('aiProposal', { action: 'reject', id: proposal.id });
-                    return true;
-                }
-                // Try finding any proposal if selection is inside
-                const anyProposal = this.storage.proposals.find((p: any) =>
-                    (state.selection.from >= anyProposal.from && state.selection.from <= anyProposal.to) ||
-                    (anyProposal.from >= state.selection.from && anyProposal.to <= state.selection.to)
-                );
-                if (anyProposal && dispatch) {
-                    // Revert text
-                    tr.insertText(anyProposal.originalText, anyProposal.from, anyProposal.to);
-                    tr.setMeta('aiProposal', { action: 'reject', id: anyProposal.id });
                     return true;
                 }
                 return false;
@@ -108,17 +105,15 @@ export const AIProposal = Extension.create<AIProposalOptions>({
 
     addStorage() {
         return {
-            proposals: [] as { id: string, from: number, to: number, originalText: string }[],
+            proposals: [] as { id: string, from: number, to: number, originalSliceJSON: string }[],
         };
     },
 
-    // Keyboard shortcuts handled in editor component for dynamic configuration
     addKeyboardShortcuts() {
         return {};
     },
 
     addProseMirrorPlugins() {
-        const { HTMLAttributes } = this.options;
         const editor = this.editor;
         const pluginKey = new PluginKey('aiProposal');
 
@@ -130,24 +125,18 @@ export const AIProposal = Extension.create<AIProposalOptions>({
                         return DecorationSet.empty;
                     },
                     apply: (tr, set) => {
-                        // Adjust existing decorations mapping
                         set = set.map(tr.mapping, tr.doc);
 
                         const meta = tr.getMeta('aiProposal');
                         if (meta) {
                             console.log('[AIProposal] Plugin received meta:', meta);
                             if (meta.action === 'add') {
-                                const { id, from, to, originalText } = meta;
-                                // Store in storage (hacky but works for command access)
-                                this.storage.proposals.push({ id, from, to, originalText });
+                                const { id, from, to, originalSliceJSON } = meta;
+                                this.storage.proposals.push({ id, from, to, originalSliceJSON });
 
                                 const decos: Decoration[] = [];
 
-                                // Create inline decorations for each text node in the range
-                                // This handles multiline content correctly
-                                console.log(`[AIProposal] Traversing nodes from ${from} to ${to}`);
                                 tr.doc.nodesBetween(from, to, (node, pos) => {
-                                    console.log(`[AIProposal] Visiting node: ${node.type.name}, isText: ${node.isText}, pos: ${pos}, size: ${node.nodeSize}`);
                                     if (node.isText) {
                                         const nodeFrom = Math.max(from, pos);
                                         const nodeTo = Math.min(to, pos + node.nodeSize);
@@ -160,9 +149,7 @@ export const AIProposal = Extension.create<AIProposalOptions>({
                                         }
                                     }
                                 });
-                                console.log('[AIProposal] Generated decorations count:', decos.length);
 
-                                // Add widget at the end
                                 decos.push(Decoration.widget(to, (view, getPos) => {
                                     const div = document.createElement('div');
                                     div.className = 'ai-proposal-actions';
@@ -172,8 +159,7 @@ export const AIProposal = Extension.create<AIProposalOptions>({
                                     acceptBtn.textContent = '✓ Accept (Ctrl+Shift+])';
                                     acceptBtn.onclick = (e) => {
                                         e.preventDefault();
-                                        // Ensure selection is in proposal range or just pass ID
-                                        const pos = getPos(); // Widget position is at 'to'
+                                        const pos = getPos();
                                         if (typeof pos === 'number') {
                                             view.dispatch(view.state.tr.setSelection((view.state.selection.constructor as any).near(view.state.doc.resolve(pos - 1))));
                                             editor.commands.acceptAIProposal();
@@ -195,36 +181,22 @@ export const AIProposal = Extension.create<AIProposalOptions>({
                                     div.appendChild(rejectBtn);
                                     div.appendChild(acceptBtn);
                                     return div;
-                                }, { side: 1 })); // side > 0 ensures it sticks after the text
+                                }, { side: 1 }));
 
                                 set = set.add(tr.doc, decos);
                             } else if (meta.action === 'accept' || meta.action === 'reject') {
-                                // Remove stored proposal
                                 this.storage.proposals = this.storage.proposals.filter((p: any) => p.id !== meta.id);
-
-                                // Remove decorations for this ID
-                                // set = set.remove(set.find(undefined, undefined, spec => spec.data?.proposalId === meta.id));
-                                // Re-create set without the match (filter is hard on DecorationSet)
-                                // Actually simplistic approach: just clear everything if we assume 1 proposal at a time mostly
-                                // or iterate. For now, let's filter:
-                                // const newDecos = set.find().filter(d => d.spec['data-proposal-id'] !== meta.id && (d.spec as any).side !== 1); 
-                                // Widget doesn't have data-proposal-id easily attached unless we add it to spec
-                                // Simplest: return DecorationSet.empty if we only support single proposal.
                                 return DecorationSet.empty;
                             }
                         }
 
-                        // Sync count to store
                         setPendingProposals(this.storage.proposals.length);
-
                         return set;
                     }
                 },
                 props: {
                     decorations(state) {
-                        const decos = pluginKey.getState(state);
-
-                        return decos;
+                        return pluginKey.getState(state);
                     },
                 },
             }),

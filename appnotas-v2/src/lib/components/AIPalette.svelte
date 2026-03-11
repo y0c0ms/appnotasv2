@@ -1,8 +1,7 @@
 <script lang="ts">
-    import { createEventDispatcher, onMount } from 'svelte';
+    import { onMount } from 'svelte';
     import { geminiService, type AIContent } from '../services/geminiService';
-    import { fade, slide, scale } from 'svelte/transition';
-    import type { Editor } from '@tiptap/core';
+    import { fade, scale } from 'svelte/transition';
     import { currentEditor } from '../stores/editorStore';
     import { get } from 'svelte/store';
 
@@ -13,16 +12,20 @@
         cmSelectionRange?: { from: number; to: number }; // CodeMirror selection range, pre-captured
     }
 
-    export let context: ExtendedAIContext;
-    export let editor: any = null; // TipTap editor instance (optional)
-    export let codeMirrorEditor: any = null; // CodeMirror editor instance (optional)
+    interface Props {
+        context: ExtendedAIContext;
+        editor?: any;
+        codeMirrorEditor?: any;
+        onClose?: () => void;
+    }
 
-    const dispatch = createEventDispatcher();
-    let instruction = '';
-    let loading = false;
-    let error = '';
+    let { context, editor = null, codeMirrorEditor = null, onClose = () => {} }: Props = $props();
 
-    let inputElement: HTMLInputElement;
+    let instruction = $state('');
+    let loading = $state(false);
+    let error = $state('');
+
+    let inputElement = $state<HTMLInputElement>();
 
     // Track selection for CodeMirror
     let cmSelection: { from: number; to: number } | null = null;
@@ -43,10 +46,12 @@
         { label: 'To List', prompt: 'Turn this text into a well-organized bulleted list.' },
     ];
 
-    let generatedResponse = '';
-    let isReviewing = false;
+    // let generatedResponse = ''; // Unused
+    // let isReviewing = false; // Unused
 
-    $: console.log('[AIPalette] Editor prop updated:', !!editor);
+    $effect(() => {
+        console.log('[AIPalette] Editor prop updated:', !!editor);
+    });
 
     async function submit(customPrompt?: string) {
         const prompt = customPrompt || instruction;
@@ -90,7 +95,7 @@
         }
 
         // 2. Close the palette immediately
-        dispatch('close');
+        onClose();
 
         // 3. Run generation in background
         runBackgroundGeneration(enhancedPrompt, enhancedContext, activeEditor, codeMirrorEditor, currentCmSelection);
@@ -105,6 +110,10 @@
         cmSelect: { from: number, to: number } | null
     ) {
         try {
+            if (cmEditor) {
+                console.log('[AIPalette] Processing background generation. PROMPT:', activePrompt.substring(0, 50) + '...');
+                console.log('[AIPalette] CM Editor present:', !!cmEditor, 'CM Select:', !!cmSelect);
+            }
             const response = await geminiService.generateResponse(activePrompt, activeContext);
             console.log(`[AIPalette] Response received, length: ${response.length}`);
 
@@ -132,9 +141,6 @@
                 return;
             }
 
-            // TipTap Insertion Logic
-            console.log('[AIPalette] Processing TipTap insertion. Editor present:', !!tiptapEditor);
-            
             if (tiptapEditor) {
                 // Find dynamic range from AIZone storage
                 let targetRange = null;
@@ -142,46 +148,19 @@
                     const zones = tiptapEditor.storage.aiZone?.zones;
                     if (zones && zones.length > 0) {
                         targetRange = zones[0];
-                        console.log('[AIPalette] Found AIZone range via storage:', targetRange);
-                    } else {
-                        console.warn('[AIPalette] No AIZone found in storage, defaulting to cursor');
                     }
                 } catch (e) {
                     console.error('[AIPalette] Error accessing AIZone storage:', e);
                 }
 
-                console.log('[AIPalette] Unsetting AIZone and inserting proposal...');
                 tiptapEditor.commands.unsetAIZone();
 
                 if (targetRange) {
-                    console.log('[AIPalette] Inserting proposal at range:', targetRange);
-                    // Pass range explicitly to command to avoid TextSelection errors on block boundaries
-                    const chain = tiptapEditor.chain().insertAIProposal(finalContent, undefined, targetRange);
-                    console.log('[AIPalette] Chain created, running...');
-                    chain.run();
+                    tiptapEditor.chain().insertAIProposal(finalContent, undefined, targetRange).run();
                 } else {
-                    console.log('[AIPalette] Inserting proposal at cursor (fallback)');
-                    const startSize = tiptapEditor.state.doc.textContent.length;
                     tiptapEditor.chain().focus().insertAIProposal(finalContent).run();
-                    const endSize = tiptapEditor.state.doc.textContent.length;
-                    console.log(`[AIPalette] Insertion complete. Doc size: ${startSize} -> ${endSize} (Diff: ${endSize - startSize})`);
                 }
-                console.log('[AIPalette] Insertion command sent.');
-            } else {
-                console.error('[AIPalette] TipTap editor instance is missing!');
             }
-
-            // CodeMirror Insertion Logic
-            if (cmEditor && cmSelect) {
-                // Unblock CodeMirror
-                cmEditor.unsetAIZone();
-                
-                // For now use original selection, but we could find the mapped range of the loading zone if we wanted perfection.
-                // Assuming user doesn't edit much while waiting in CodeMirror for now.
-                // TODO: use dynamic range from loading zone module (by exporting a helper in CodeMirrorEditor)
-                cmEditor.insertAIProposal(finalContent, cmSelect);
-            } 
-
         } catch (e) {
             console.error('AI Generation failed', e);
             if (tiptapEditor) {
@@ -198,15 +177,25 @@
             e.preventDefault();
             submit();
         } else if (e.key === 'Escape') {
-            dispatch('close');
+            onClose();
         }
+    }
+
+    function handleOverlayClick(e: MouseEvent) {
+        if (e.target === e.currentTarget) {
+            onClose();
+        }
+    }
+    
+    function handleOverlayKey(e: KeyboardEvent) {
+        if (e.key === 'Escape') onClose();
     }
 </script>
 
 <div 
     class="ai-palette-overlay" 
-    on:click|self={() => dispatch('close')} 
-    on:keydown={(e) => e.key === 'Escape' && dispatch('close')}
+    onclick={handleOverlayClick} 
+    onkeydown={handleOverlayKey}
     transition:fade={{ duration: 150 }}
     role="button"
     tabindex="0"
@@ -240,10 +229,10 @@
                         bind:this={inputElement}
                         bind:value={instruction}
                         placeholder="Ask AI to summarize, rewrite, or explain..."
-                        on:keydown={handleKeyDown}
+                        onkeydown={handleKeyDown}
                         disabled={loading}
                     />
-                    <button class="send-btn" on:click={() => submit()} disabled={!instruction}>➔</button>
+                    <button class="send-btn" onclick={() => submit()} disabled={!instruction}>➔</button>
                 </div>
 
                 {#if error}
@@ -252,7 +241,7 @@
 
                 <div class="presets">
                     {#each presets as preset}
-                        <button class="preset-btn" on:click={() => submit(preset.prompt)} disabled={loading}>
+                        <button class="preset-btn" onclick={() => submit(preset.prompt)} disabled={loading}>
                             {preset.label}
                         </button>
                     {/each}

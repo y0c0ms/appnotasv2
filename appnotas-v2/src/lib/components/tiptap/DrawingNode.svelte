@@ -3,24 +3,28 @@
     import { NodeViewWrapper } from 'svelte-tiptap';
     import { settingsStore } from '../../stores/settings';
 
-    export let node: any;
-    export let updateAttributes: (attrs: any) => void;
+    interface Props {
+        node: any;
+        updateAttributes: (attrs: any) => void;
+    }
 
-    let canvas: HTMLCanvasElement;
-    let container: HTMLElement;
-    let isDrawing = false;
-    let currentLine: any[] = [];
-    let lines: any[] = [];
-    let isResizing = false;
-    let activeHandle: 'br' | 'tl' | null = null;
-    let startX = 0;
-    let startY = 0;
-    let startWidth = 0;
-    let startHeight = 0;
+    let { node, updateAttributes }: Props = $props();
 
-    $: width = node.attrs.width || 500;
-    $: height = node.attrs.height || 300;
-    $: zoom = $settingsStore.zoomLevel || 1.0;
+    let canvas = $state<HTMLCanvasElement>();
+    let container = $state<HTMLElement>();
+    let isDrawing = $state(false);
+    let currentLine = $state<any[]>([]);
+    let lines = $state<any[]>([]);
+    let isResizing = $state(false);
+    let activeHandle = $state<'br' | 'tl' | null>(null);
+    let startX = $state(0);
+    let startY = $state(0);
+    let startWidth = $state(0);
+    let startHeight = $state(0);
+
+    let width = $derived(node.attrs.width || 500);
+    let height = $derived(node.attrs.height || 300);
+    let zoom = $derived($settingsStore.zoomLevel || 1.0);
 
     onMount(() => {
         // Parse lines once
@@ -32,10 +36,12 @@
         }
 
         syncSize();
-        const observer = new ResizeObserver(syncSize);
-        observer.observe(container);
-
-        return () => observer.disconnect();
+        // Container should be bound by now
+        if (container) {
+            const observer = new ResizeObserver(syncSize);
+            observer.observe(container);
+            return () => observer.disconnect();
+        }
     });
 
     function syncSize() {
@@ -62,8 +68,8 @@
             if (Array.isArray(line) && line.length > 0) {
                 ctx.beginPath();
                 line.forEach((point: any, index: number) => {
-                    const x = (point.x / 500) * canvas.width;
-                    const y = (point.y / height) * canvas.height;
+                    const x = (point.x / 500) * canvas!.width;
+                    const y = (point.y / height) * canvas!.height;
                     if (index === 0) ctx.moveTo(x, y);
                     else ctx.lineTo(x, y);
                 });
@@ -73,6 +79,7 @@
     }
 
     function onMouseDown(e: MouseEvent) {
+        if (!canvas) return;
         isDrawing = true;
         const rect = canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left) * (500 / canvas.width);
@@ -82,19 +89,35 @@
     }
 
     function onMouseMove(e: MouseEvent) {
-        if (!isDrawing) return;
+        if (!isDrawing || !canvas) return;
         const rect = canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left) * (500 / canvas.width);
         const y = (e.clientY - rect.top) * (height / canvas.height);
+        
+        // Mutate currentLine and force update
+        // Since lines is state, mutating deep object might not trigger if not reassigned or using a store. 
+        // But currentLine is pushed to lines. 
+        // Svelte 5 proxies should handle deep reactivity if lines is accessed?
+        // Actually, currentLine is inside lines.
         currentLine.push({ x, y });
-        lines = lines; // trigger Svelte update if needed
+        // lines = lines; // trigger update? 
+        // In Svelte 5, deep mutation is tracked if using $state.
+        // But since currentLine is a reference inside lines array...
+        // Let's force draw explicitly, re-rendering canvas doesn't depend on Svelte template.
         draw();
+        
+        // However, we need 'lines' to update so stopDrawing can save it.
     }
 
     function stopDrawing() {
         if (!isDrawing) return;
         isDrawing = false;
-        updateAttributes({ lines: [...lines] });
+        // Check if I need to clone lines to ensure TipTap gets a fresh object?
+        // updateAttributes expects a JSON serializable object usually.
+        // lines is a proxy.
+        // Svelte 5 $state.snapshot might be needed if updateAttributes is external and needs plain object?
+        // Or just spread.
+        updateAttributes({ lines: $state.snapshot(lines) });
     }
 
     function startResize(e: MouseEvent, handle: 'br' | 'tl') {
@@ -142,24 +165,24 @@
         <div class="drawing-container" style="height: {height}px;">
             <canvas
                 bind:this={canvas}
-                on:mousedown={onMouseDown}
-                on:mousemove={onMouseMove}
-                on:mouseup={stopDrawing}
-                on:mouseleave={stopDrawing}
+                onmousedown={onMouseDown}
+                onmousemove={onMouseMove}
+                onmouseup={stopDrawing}
+                onmouseleave={stopDrawing}
                 style="cursor: crosshair; display: block;"
             ></canvas>
         </div>
 
         <div 
             class="drawing-resize-handle br" 
-            on:mousedown={(e) => startResize(e, 'br')}
+            onmousedown={(e) => startResize(e, 'br')}
             role="button"
             tabindex="0"
             aria-label="Resize from bottom right"
         ></div>
         <div 
             class="drawing-resize-handle tl" 
-            on:mousedown={(e) => startResize(e, 'tl')}
+            onmousedown={(e) => startResize(e, 'tl')}
             role="button"
             tabindex="0"
             aria-label="Resize from top left"

@@ -2,7 +2,8 @@
     import { settingsStore } from '$lib/stores/settings';
     import { settingsOpen } from '$lib/stores/shortcuts';
     import { focusArea } from '$lib/stores/focus';
-    import { open as openDialog, message } from '@tauri-apps/plugin-dialog';
+    import { invoke } from '@tauri-apps/api/core';
+    import { open as openDialog, save as saveDialog, message } from '@tauri-apps/plugin-dialog';
     import { fade, slide } from 'svelte/transition';
     import { geminiService } from '../services/geminiService';
     import { onMount } from 'svelte';
@@ -124,6 +125,64 @@
         settingsStore.save();
         
         recordingShortcut = null;
+    }
+
+    async function exportSettings() {
+        try {
+            const currentSettings = $settingsStore;
+            const content = JSON.stringify(currentSettings, null, 2);
+            
+            const selected = await saveDialog({
+                filters: [{ name: 'Settings', extensions: ['txt', 'json'] }],
+                defaultPath: 'appnotas_settings.txt',
+                title: 'Export Settings'
+            });
+
+            if (selected) {
+                await invoke('write_file', { path: selected, content });
+                await message('Settings exported successfully!', { title: 'Export Success', kind: 'info' });
+            }
+        } catch (err) {
+            console.error('Failed to export settings:', err);
+            await message(`Failed to export settings: ${err}`, { title: 'Export Error', kind: 'error' });
+        }
+    }
+
+    async function importSettings() {
+        try {
+            const selected = await openDialog({
+                multiple: false,
+                filters: [{ name: 'Settings', extensions: ['txt', 'json'] }],
+                title: 'Import Settings'
+            });
+
+            if (selected && typeof selected === 'string') {
+                const content = await invoke<string>('read_file', { path: selected });
+                const imported = JSON.parse(content);
+                
+                // Simple validation check (should have some expected keys)
+                if (imported && typeof imported === 'object' && ('keybinds' in imported || 'geminiKey' in imported)) {
+                    // Merge with current state to ensure no missing keys if schema changed
+                    settingsStore.update(current => ({
+                        ...current,
+                        ...imported
+                    }));
+                    await settingsStore.save();
+                    
+                    // Trigger manual directory update if it changed
+                    if (imported.notesDirectory) {
+                        window.dispatchEvent(new CustomEvent('notes-directory-changed', { detail: imported.notesDirectory }));
+                    }
+                    
+                    await message('Settings imported and applied successfully!', { title: 'Import Success', kind: 'info' });
+                } else {
+                    throw new Error('Invalid settings file format.');
+                }
+            }
+        } catch (err) {
+            console.error('Failed to import settings:', err);
+            await message(`Failed to import settings: ${err instanceof Error ? err.message : String(err)}`, { title: 'Import Error', kind: 'error' });
+        }
     }
 
     async function selectDirectory() {
@@ -313,6 +372,15 @@
                         </button>
                     </div>
                 {/each}
+            </div>
+        </section>
+
+        <section>
+            <h3>Data Management</h3>
+            <p class="hint">Export or import your settings (shortcuts, AI keys, etc.)</p>
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                <button class="btn-picker" style="flex: 1;" on:click={exportSettings}>📤 Export Settings</button>
+                <button class="btn-picker" style="flex: 1;" on:click={importSettings}>📥 Import Settings</button>
             </div>
         </section>
     </div>

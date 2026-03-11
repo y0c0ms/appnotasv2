@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import { settingsStore } from '$lib/stores/settings';
 	import { EditorView, basicSetup } from 'codemirror';
@@ -13,16 +13,29 @@
 	import { markdown } from '@codemirror/lang-markdown';
 	import { oneDark } from '@codemirror/theme-one-dark';
 
-	export let content: string = '';
-	export let language: string = 'javascript';
-	export let onUpdate: (content: string) => void = () => {};
-	export let onSave: (() => void) | null = null;
-	export let onAITrigger: ((context: { text: string; fullContent: string }) => void) | null = null;
+    import { aiProposalExtension, addProposal, acceptProposal, rejectProposal, proposalField, getProposalAtCursor } from '../codemirror/aiProposal';
+    import { aiLoadingExtension, setLoadingZone, clearLoadingZone } from '../codemirror/aiLoading';
+    import { Prec } from '@codemirror/state';
 
-	const dispatch = createEventDispatcher();
+    interface Props {
+        content?: string;
+        language?: string;
+        onUpdate?: (content: string) => void;
+        onSave?: (() => void) | null;
+        onAITrigger?: ((context: { text: string; fullContent: string; selectionRange?: { from: number; to: number } }) => void) | null;
+    }
 
-	let editorContainer: HTMLElement;
-	let view: EditorView | null = null;
+    let {
+        content = '',
+        language = 'javascript',
+        onUpdate = () => {},
+        onSave = null,
+        onAITrigger = null
+    }: Props = $props();
+
+	let editorContainer = $state<HTMLElement>();
+    // Use raw state for complex objects like EditorView to avoid proxy performance hits or issues
+	let view = $state.raw<EditorView | null>(null);
 	let languageCompartment = new Compartment();
 
 	// Map language strings to CodeMirror language extensions
@@ -47,13 +60,6 @@
 				key: 'Mod-s',
 				run: () => {
 					if (onSave) onSave();
-					return true;
-				}
-			},
-			{
-				key: 'Ctrl-Shift-Enter',
-				run: () => {
-					triggerAI();
 					return true;
 				}
 			}
@@ -123,32 +129,85 @@
 			state,
 			parent: editorContainer
 		});
+        
+        const handleGlobalAITrigger = () => {
+            if (document.activeElement?.closest('.codemirror-editor') === editorContainer) {
+                console.log('[CodeMirror] Global AI trigger received');
+                triggerAI();
+            }
+        };
+
+        const handleGlobalAIAccept = () => {
+            if (document.activeElement?.closest('.codemirror-editor') === editorContainer && view) {
+                const proposal = getProposalAtCursor(view.state);
+                if (proposal) {
+                    view.dispatch({ effects: acceptProposal.of(proposal.id) });
+                }
+            }
+        };
+
+        const handleGlobalAIReject = () => {
+            if (document.activeElement?.closest('.codemirror-editor') === editorContainer && view) {
+                const proposal = getProposalAtCursor(view.state);
+                if (proposal) {
+                     view.dispatch({
+                        changes: { from: proposal.from, to: proposal.to, insert: proposal.originalText },
+                        effects: rejectProposal.of(proposal.id)
+                    });
+                }
+            }
+        };
+
+        window.addEventListener('app:ai-trigger', handleGlobalAITrigger);
+        window.addEventListener('app:ai-accept', handleGlobalAIAccept);
+        window.addEventListener('app:ai-reject', handleGlobalAIReject);
+
+        // Event listener for AI actions
+        if (editorContainer) {
+            editorContainer.addEventListener('ai-proposal-action', handleProposalAction as EventListener);
+        }
+
+        return () => {
+            window.removeEventListener('app:ai-trigger', handleGlobalAITrigger);
+            window.removeEventListener('app:ai-accept', handleGlobalAIAccept);
+            window.removeEventListener('app:ai-reject', handleGlobalAIReject);
+            view?.destroy();
+            if (editorContainer) {
+                 editorContainer.removeEventListener('ai-proposal-action', handleProposalAction as EventListener);
+            }
+        };
 	});
 
 	onDestroy(() => {
-		view?.destroy();
+        // onDestroy is mostly handled by the return from onMount in Svelte 5 pattern or explicit cleanup
 	});
 
 	// Update content when prop changes externally
-	$: if (view && content !== view.state.doc.toString()) {
-		view.dispatch({
-			changes: {
-				from: 0,
-				to: view.state.doc.length,
-				insert: content
-			}
-		});
-	}
+    $effect(() => {
+        if (view && content !== view.state.doc.toString()) {
+            view.dispatch({
+                changes: {
+                    from: 0,
+                    to: view.state.doc.length,
+                    insert: content
+                }
+            });
+        }
+    });
 
 	// Update language when prop changes
-	$: if (view && language) {
-		view.dispatch({
-			effects: languageCompartment.reconfigure(getLanguageExtension(language))
-		});
-	}
+    $effect(() => {
+        if (view && language) {
+            view.dispatch({
+                effects: languageCompartment.reconfigure(getLanguageExtension(language))
+            });
+        }
+    });
 
 	function triggerAI() {
-		if (!view || !onAITrigger) return;
+		if (!view || !onAITrigger) {
+            return;
+        }
 		
 		const selection = view.state.selection.main;
 		const selectedText = view.state.sliceDoc(selection.from, selection.to);
@@ -186,11 +245,6 @@
 		view?.focus();
 	}
 
-	import { aiProposalExtension, addProposal, acceptProposal, rejectProposal, proposalField, getProposalAtCursor } from '../codemirror/aiProposal';
-    import { aiLoadingExtension, setLoadingZone, clearLoadingZone } from '../codemirror/aiLoading';
-    import type { DecorationSet } from '@codemirror/view';
-    import { Prec } from '@codemirror/state';
-
     // Expose AI methods
     export function setAIZone(from: number, to: number) {
         if (!view) {
@@ -204,7 +258,7 @@
     export function unsetAIZone() {
         if (!view) return;
         console.log('[CodeMirrorEditor] unsetAIZone');
-        view.dispatch({ effects: clearLoadingZone.of(null) });
+        view.dispatch({ effects: clearLoadingZone.of(null as any) });
     }
 
     export function insertAIProposal(content: string, originalContent?: string) {
@@ -281,31 +335,6 @@
         ]);
     }
 
-
-
-    onMount(() => {
-        // ... (above code executes, but we add listener here)
-        // Wait, onMount runs only once. View setup is also in onMount.
-        // I need to add listener to container which is bound.
-        // But `editorContainer` isn't available until mount.
-        // So I can append this logic inside the existing onMount block if I find it, 
-        // OR add a separate reactive statement or separate onMount (svelte merges them).
-        // Since I can't easily merge into the big onMount block without seeing it all safely,
-        // I'll add a separate action or hook to the div?
-        // Or just add `use:action`?
-        // Or cleaner: modify the existing `onMount`.
-        
-        if (editorContainer) {
-            editorContainer.addEventListener('ai-proposal-action', handleProposalAction as EventListener);
-        }
-    });
-    
-    onDestroy(() => {
-        if (editorContainer) {
-             editorContainer.removeEventListener('ai-proposal-action', handleProposalAction as EventListener);
-        }
-    });
-
     function handleProposalAction(e: CustomEvent) {
         const { action, id } = e.detail;
         if (!view) return;
@@ -331,7 +360,7 @@
                  view.dispatch({ effects: acceptProposal.of(id) });
             } else if (action === 'reject') {
                  view.dispatch({
-                    changes: { from: proposal.from, to: proposal.to, insert: proposal.originalText },
+                    changes: { from: (proposal as any).from, to: (proposal as any).to, insert: (proposal as any).originalText },
                     effects: rejectProposal.of(id)
                  });
             }

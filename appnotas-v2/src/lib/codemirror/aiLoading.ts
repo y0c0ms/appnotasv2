@@ -67,9 +67,12 @@ export const loadingTooltipState = StateField.define<Tooltip | null>({
 
 export const aiLoadingTheme = EditorView.baseTheme({
     '.cm-ai-loading-zone': {
-        backgroundColor: 'rgba(0, 0, 0, 0.4)',
-        filter: 'blur(2px) grayscale(0.5)',
-        transition: 'all 0.5s ease'
+        background: 'rgba(255, 255, 255, 0.05)',
+        backdropFilter: 'blur(3px) grayscale(0.8)',
+        filter: 'blur(0.5px)', // Subtle softening
+        transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+        position: 'relative',
+        zIndex: '5',
     },
     '.cm-ai-loading-tooltip': {
         display: 'flex',

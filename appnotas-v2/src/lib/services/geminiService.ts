@@ -30,7 +30,8 @@ class GeminiService {
         if (!this.genAI) throw new Error("Failed to initialize Gemini AI.");
 
         const settings = get(settingsStore);
-        const modelName = modelOverride || settings.aiModelPreference || 'gemini-2.5-flash';
+        const modelName = modelOverride || settings.aiModelPreference;
+        if (!modelName) throw new Error("AI Model preference not configured.");
 
         const model = this.genAI.getGenerativeModel({ model: modelName });
         console.log(`[GeminiService] Model initialized: ${modelName}`);
@@ -43,7 +44,9 @@ class GeminiService {
 - Do NOT provide multiple options and do NOT ask the user to choose. 
 - Do NOT include any introductory or concluding remarks (e.g., "Here is the refactored code").
 - For code: Ensure consistent indentation (default to 2 spaces). Prioritize efficiency, readability, and modern best practices for the detected language.
-- Return content in raw Markdown format suitable for direct insertion into a TipTap editor.\n\n`);
+- Return content in raw Markdown format suitable for direct insertion into a TipTap editor.
+- CRITICAL: When working with checklists or task lists, you MUST format each item as a separate line using "- [ ] item text" for unchecked tasks and "- [x] item text" for checked tasks. Each task MUST be on its own line. Never collapse multiple tasks into a single line. Preserve the checklist structure.
+- When the input contains checklist items (tasks with checkboxes), always return the result in the same checklist format with one item per line.\n\n`);
 
         // 1. Add context text first if it exists
         if (context.text) {

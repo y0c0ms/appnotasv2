@@ -234,3 +234,39 @@ export const filteredNotes = derived(
         );
     }
 );
+
+/**
+ * Reload a note's content from disk (for diff comparison).
+ * Returns the body content (without frontmatter) or null if the note has no path.
+ */
+export async function reloadNoteFromDisk(id: string): Promise<string | null> {
+    const notes = get(notesList);
+    const note = notes.find(n => n.id === id);
+    if (!note || !note.path) return null;
+
+    try {
+        const rawContent = await invoke<string>('read_file', { path: note.path });
+        
+        // Parse out frontmatter to get just the body
+        if (rawContent.startsWith('---')) {
+            const parts = rawContent.split('---');
+            if (parts.length >= 3) {
+                // parts[0] is empty, parts[1] is frontmatter, parts[2+] is body
+                return parts.slice(2).join('---').trim();
+            }
+        }
+        return rawContent.trim();
+    } catch (error) {
+        console.error('Failed to reload note from disk:', error);
+        return null;
+    }
+}
+
+/**
+ * Apply externally changed content to a note in the store.
+ */
+export function applyExternalContent(id: string, newContent: string) {
+    notesList.update(notes =>
+        notes.map(n => n.id === id ? { ...n, content: newContent, updated_at: new Date().toISOString() } : n)
+    );
+}

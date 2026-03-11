@@ -2,9 +2,13 @@
 	import { NodeViewWrapper, NodeViewContent } from 'svelte-tiptap';
 	import { onMount } from 'svelte';
 
-	export let node: any;
-	export let updateAttributes: (attrs: any) => void;
-	export let extension: any;
+    interface Props {
+        node: any;
+        updateAttributes: (attrs: any) => void;
+        extension: any;
+    }
+
+	let { node, updateAttributes, extension }: Props = $props();
 
 	let languages = extension.options.lowlight.listLanguages();
     
@@ -12,22 +16,17 @@
     if (!languages.includes('typescript')) languages.push('typescript');
     languages.sort();
 
-	let selectedLanguage = node.attrs.language || 'plaintext';
-    let copyState = 'Copy';
-    let lineCount = 1;
-
-	$: if (node.attrs.language !== selectedLanguage) {
-		selectedLanguage = node.attrs.language || 'plaintext';
-	}
+	let selectedLanguage = $derived(node.attrs.language || 'plaintext');
+    let copyState = $state('Copy');
     
     // Reactive line count based on content
-    $: if (node.content) {
-        // Count newlines in text content
-        // TipTap nodes don't always expose raw text content reactively in 'node', 
-        // so we might rely on the editor update cycle or content size
-        const text = node.textContent || '';
-        lineCount = text.split('\n').length;
-    }
+    let lineCount = $derived.by(() => {
+        if (node.content) {
+             const text = node.textContent || '';
+             return text.split('\n').length;
+        }
+        return 1;
+    });
 
 	function handleLanguageChange(event: Event) {
 		const select = event.target as HTMLSelectElement;
@@ -47,14 +46,14 @@
         <div class="drag-handle" data-drag-handle contenteditable="false" draggable="true"></div>
         <div class="code-block-header">
             <div class="lang-selector-group">
-                <select class="language-select" value={selectedLanguage} on:change={handleLanguageChange}>
+                <select class="language-select" value={selectedLanguage} onchange={handleLanguageChange}>
                     <option value="plaintext">Plain Text</option>
                     {#each languages as lang}
                         <option value={lang}>{lang}</option>
                     {/each}
                 </select>
             </div>
-            <button class="copy-btn" on:click={copyCode}>
+            <button class="copy-btn" onclick={copyCode}>
                 {#if copyState === 'Copied!'}
                     ✓ Copied
                 {:else}
@@ -81,6 +80,7 @@
 		border-radius: 8px;
 		margin: 1.5rem 0;
 		overflow: hidden;
+		border: 2px solid transparent; /* Prepare for border transition if needed */
         position: relative;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 	}
@@ -201,7 +201,7 @@
 		padding: 1rem;
 		margin: 0;
 		overflow-x: auto;
-        font-family: inherit; /* Inherit font settings from body parent */
+		font-family: inherit; /* Inherit font settings from body parent */
         font-size: inherit;
         line-height: inherit;
         white-space: pre; 

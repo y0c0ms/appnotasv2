@@ -42,7 +42,8 @@ fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
     let mut title = String::new();
     let mut created = String::new();
     let mut modified = String::new();
-    let tags = vec![];
+    let mut tags = vec![];
+    let mut color = None;
 
     for line in frontmatter_str.lines() {
         if let Some((key, value)) = line.split_once(':') {
@@ -52,6 +53,7 @@ fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
                 "title" => title = value.to_string(),
                 "created" => created = value.to_string(),
                 "modified" => modified = value.to_string(),
+                "color" => color = Some(value.to_string()),
                 _ => {}
             }
         }
@@ -63,7 +65,7 @@ fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
             created,
             modified,
             tags,
-            color: None,
+            color,
         },
         body.to_string(),
     ))

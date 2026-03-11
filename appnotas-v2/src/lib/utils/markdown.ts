@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import { openFiles, activeFile } from './files';
+import { openFiles, activeFile } from '$lib/stores/files';
 import { invoke } from '@tauri-apps/api/core';
 
 /**
@@ -11,12 +11,12 @@ const renderer = new marked.Renderer();
 const originalText = renderer.text.bind(renderer);
 renderer.text = (text) => {
     // Handle @file mentions - clickable links to open files
-    text = text.replace(/@file\{([^}]+)\}/g, (match, filepath) => {
+    text = (text as any).replace(/@file\{([^}]+)\}/g, (match: string, filepath: string) => {
         return `<a href="#" class="file-mention" data-filepath="${filepath.trim()}">${filepath.trim()}</a>`;
     });
 
     // Handle @code mentions - inline code with syntax highlighting
-    text = text.replace(/@code\{([^}]+)\}/g, (match, code) => {
+    text = (text as any).replace(/@code\{([^}]+)\}/g, (match: string, code: string) => {
         return `<code class="inline-code">${code.trim()}</code>`;
     });
 
@@ -73,7 +73,7 @@ export function setupFileMentionHandlers(container: HTMLElement) {
                     const language = languageMap[ext] || 'text';
 
                     // Open in editor
-                    openFiles.update(files => {
+                    openFiles.update((files: any[]) => {
                         // Check if already open
                         if (files.some(f => f.path === filepath)) {
                             activeFile.set(files.find(f => f.path === filepath)!);

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount, onDestroy, tick } from 'svelte';
     import { get } from 'svelte/store';
     import { settingsStore } from '$lib/stores/settings';
     import { focusArea } from '$lib/stores/focus';
@@ -9,8 +9,12 @@
     import { invoke } from '@tauri-apps/api/core';
     import 'xterm/css/xterm.css';
 
-    export let cwd: string = '';
-    export let visible: boolean = true;
+    interface Props {
+        cwd?: string;
+        visible?: boolean;
+    }
+
+    let { cwd = '', visible = true }: Props = $props();
 
     interface ShellOption {
         id: string;
@@ -19,13 +23,13 @@
         available: boolean;
     }
 
-    let terminalEl: HTMLElement;
-    let terminal: Terminal | null = null;
-    let fitAddon: FitAddon | null = null;
-    let pty: any = null;
-    let showShellMenu = false;
-    let availableShells: ShellOption[] = [];
-    let currentShell: ShellOption | null = null;
+    let terminalEl = $state<HTMLElement>();
+    let terminal = $state<Terminal | null>(null);
+    let fitAddon = $state<FitAddon | null>(null);
+    let pty = $state<any>(null);
+    let showShellMenu = $state(false);
+    let availableShells = $state<ShellOption[]>([]);
+    let currentShell = $state<ShellOption | null>(null);
 
     // Detect available shells on the system
     async function detectShells() {
@@ -115,7 +119,8 @@
         if (!terminalEl || terminal) return;
 
         // Create xterm.js terminal
-        terminal = new Terminal({
+        // Note: Terminal constructor might modify DOM, ensure it runs client-side (onMount or effect)
+        const term = new Terminal({
             cursorBlink: true,
             fontSize: 13,
             fontFamily: '"Fira Code", "Cascadia Code", Consolas, monospace',
@@ -123,7 +128,7 @@
                 background: '#0d1117',
                 foreground: '#c9d1d9',
                 cursor: '#4a9eff',
-                selection: 'rgba(74, 158, 255, 0.3)',
+                selectionBackground: 'rgba(74, 158, 255, 0.3)',
                 black: '#0d1117',
                 red: '#ff7b72',
                 green: '#7ee787',
@@ -136,20 +141,23 @@
             allowTransparency: true,
         });
 
-        fitAddon = new FitAddon();
-        terminal.loadAddon(fitAddon);
-        terminal.open(terminalEl);
-        fitAddon.fit();
+        const fit = new FitAddon();
+        term.loadAddon(fit);
+        term.open(terminalEl);
+        fit.fit();
+        
+        terminal = term;
+        fitAddon = fit;
 
         await spawnShell();
 
         // Send input to PTY
-        terminal.onData((data) => {
+        term.onData((data) => {
             pty?.write(data);
         });
 
         // Handle resize
-        terminal.onResize(({ cols, rows }) => {
+        term.onResize(({ cols, rows }) => {
             pty?.resize(cols, rows);
         });
     }
@@ -176,15 +184,16 @@
             
             console.log(`Spawning ${currentShell.name} with options:`, spawnOptions);
 
-            pty = spawn(currentShell.command, [], spawnOptions);
+            const newPty = spawn(currentShell.command, [], spawnOptions);
+            pty = newPty; // Assign to state
 
             // Listen for data from PTY
-            pty.onData((data: string) => {
+            newPty.onData((data: any) => {
                 terminal?.write(data);
             });
 
             // Listen for exit
-            pty.onExit(({ exitCode }: { exitCode: number }) => {
+            newPty.onExit(({ exitCode }: { exitCode: number }) => {
                 terminal?.write(`\r\n\x1b[33m[${currentShell?.name} exited with code ${exitCode}]\x1b[0m\r\n`);
             });
 
@@ -213,9 +222,7 @@
 
     onMount(async () => {
         await detectShells();
-        if (visible) {
-            initTerminal();
-        }
+        // Effect will trigger initTerminal logic when terminalEl is bound and visible
         window.addEventListener('resize', handleResize);
         document.addEventListener('click', handleClickOutside);
     });
@@ -234,35 +241,41 @@
         }
     }
 
-    $: if (visible && !terminal && terminalEl) {
-        initTerminal();
-    }
+    $effect(() => {
+        if (visible && !terminal && terminalEl) {
+            initTerminal();
+        }
+    });
 
-    $: if (visible && fitAddon && terminal) {
-        // Delay fit to ensure terminal is fully initialized
-        setTimeout(() => {
-            try {
-                fitAddon?.fit();
-            } catch (e) {
-                // Ignore fit errors during initialization
-                console.debug('[Terminal] Fit skipped:', e);
-            }
-        }, 150);
-    }
+    $effect(() => {
+        if (visible && fitAddon && terminal) {
+            // Delay fit to ensure terminal is fully initialized
+            const timer = setTimeout(() => {
+                try {
+                    fitAddon?.fit();
+                } catch (e) {
+                    // Ignore fit errors during initialization
+                    console.debug('[Terminal] Fit skipped:', e);
+                }
+            }, 150);
+            return () => clearTimeout(timer); // Cleanup timeout
+        }
+    });
 
     // Auto-focus terminal when focusArea switches to 'terminal'
-    import { tick } from 'svelte';
-    $: if ($focusArea === 'terminal' && terminal && visible) {
-        tick().then(() => {
-            terminal?.focus();
-        });
-    }
+    $effect(() => {
+        if ($focusArea === 'terminal' && terminal && visible) {
+            tick().then(() => {
+                terminal?.focus();
+            });
+        }
+    });
 </script>
 
-<div class="terminal-container" class:hidden={!visible}>
+<div class={['terminal-container', !visible && 'hidden'].filter(Boolean).join(' ')}>
     <div class="terminal-header">
         <div class="shell-selector">
-            <button class="shell-button" on:click|stopPropagation={toggleShellMenu}>
+            <button class="shell-button" onclick={(e) => { e.stopPropagation(); toggleShellMenu(); }}>
                 <span class="shell-icon">&gt;_</span>
                 <span class="shell-name">{currentShell?.name || 'Select Shell'}</span>
                 <span class="dropdown-arrow">▼</span>
@@ -273,7 +286,7 @@
                         <button 
                             class="shell-option"
                             class:active={currentShell?.id === shell.id}
-                            on:click|stopPropagation={() => selectShell(shell)}
+                            onclick={(e) => { e.stopPropagation(); selectShell(shell); }}
                         >
                             <span class="option-icon">&gt;_</span>
                             <span class="option-name">{shell.name}</span>
@@ -291,8 +304,8 @@
         class="terminal-body" 
         class:focused={$focusArea === 'terminal'}
         bind:this={terminalEl}
-        on:click={() => focusArea.set('terminal')}
-        on:keydown={(e) => e.key === 'Enter' && focusArea.set('terminal')}
+        onclick={() => focusArea.set('terminal')}
+        onkeydown={(e) => e.key === 'Enter' && focusArea.set('terminal')}
         role="button"
         tabindex="0"
         aria-label="Terminal Output"

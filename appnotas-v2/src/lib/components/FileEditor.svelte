@@ -1,42 +1,128 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { saveRequested } from '$lib/stores/shortcuts';
+	import { saveRequested, commandPaletteOpen, colorChangeRequested, activeTab } from '$lib/stores/shortcuts';
 	import { focusArea } from '$lib/stores/focus';
 	import { settingsStore } from '$lib/stores/settings';
 	import TipTapEditor from './TipTapEditor.svelte';
 	import CodeMirrorEditor from './CodeMirrorEditor.svelte';
 	import AIPalette from './AIPalette.svelte';
 
-	export let content: string;
-	export let language: string = 'markdown';
-	export let onSave: ((content: string) => void) | null = null;
-	export let onModified: ((modified: boolean) => void) | null = null;
-	export let handleFileClick: (path: string) => void = () => {};
+	interface Props {
+		content: string;
+		language?: string;
+		onSave?: ((content: string) => void) | null;
+		onModified?: ((modified: boolean) => void) | null;
+		handleFileClick?: (path: string) => void;
+	}
 
-	let tiptapEditor: any;
-	let codeMirrorEditor: any;
-	let textContent = content;
-	let initialContent = content;
-	let isModified = false;
-	let showAIPalette = false;
-	let aiContext: any = null;
+	let {
+		content: initial_content,
+		language = 'markdown',
+		onSave = null,
+		onModified = null,
+		handleFileClick = () => {}
+	}: Props = $props();
+
+	let tiptapEditor = $state<any>(undefined);
+	let codeMirrorEditor = $state<any>(undefined);
+	
+	// We use state initialized from prop. 
+    // In Svelte 5, we can use $state with prop value directly, 
+    // but destructuring props is usually cleaner to avoid captures warning.
+	let textContent = $state(initial_content);
+	let initialContent = $state(initial_content);
+	let isModified = $state(false);
+	
+	let showAIPalette = $state(false);
+	let aiContext = $state<any>(null);
+
+	// Derive background style based on frontmatter
+	let colorHex = $derived.by(() => {
+		if (isCodeFile) return 'default';
+        let colorName = 'default';
+        
+		if (textContent.startsWith('---\n')) {
+			const parts = textContent.split('---\n');
+			if (parts.length >= 3) {
+				const fm = parts[1];
+				const match = fm.match(/color:\s*([^\s]+)/);
+				if (match) {
+					colorName = match[1].trim();
+				}
+			}
+		}
+		
+		const colorMap: Record<string, string> = {
+			'red': $settingsStore.customColors.ctrl1,
+			'yellow': $settingsStore.customColors.ctrl2,
+			'green': $settingsStore.customColors.ctrl3,
+			'blue': '#4a9eff',
+			'purple': '#b314e3',
+			'default': 'inherit'
+		};
+		return colorMap[colorName] || colorName;
+	});
+
+	let backgroundStyle = $derived(colorHex === 'default' || colorHex === 'inherit' || colorHex === 'transparent'
+		? 'background: #0d1117;' 
+		: `background: linear-gradient(180deg, ${colorHex}1A 0%, #0d1117 100%);`);
+
+	// Process external color changes (when files tab is active)
+	$effect(() => {
+		if ($colorChangeRequested && $activeTab === 'files' && !isCodeFile) {
+			const color = $colorChangeRequested;
+			
+			// Inject or update color in frontmatter
+			let hasFrontmatter = textContent.startsWith('---\n');
+			if (hasFrontmatter) {
+				const parts = textContent.split('---\n');
+				if (parts.length >= 3) {
+					let fm = parts[1];
+					const lines = fm.split('\n');
+					let hasColor = false;
+					for (let i = 0; i < lines.length; i++) {
+						if (lines[i].startsWith('color:')) {
+							lines[i] = `color: ${color}`;
+							hasColor = true;
+							break;
+						}
+					}
+					if (!hasColor) {
+						lines.push(`color: ${color}`);
+					}
+					parts[1] = lines.filter(Boolean).join('\n') + '\n';
+					textContent = parts.join('---\n');
+				}
+			} else {
+				const fm = `color: ${color}\n`;
+				textContent = `---\n${fm}---\n\n${textContent}`;
+			}
+			
+			isModified = true;
+			colorChangeRequested.set(''); // clear it so we don't re-trigger loops
+		}
+	});
 
 	// Determine if this is a code file or markdown
-	$: isCodeFile = language !== 'markdown';
+	let isCodeFile = $derived(language !== 'markdown');
     
-    $: console.log(`[FileEditor] Language: ${language}, isCodeFile: ${isCodeFile}`);
+    $effect(() => {
+        console.log(`[FileEditor] Language: ${language}, isCodeFile: ${isCodeFile}`);
+    });
 
 	// Watch for Ctrl+S
-	$: if ($saveRequested) {
-		save();
-	}
+    $effect(() => {
+        if ($saveRequested) {
+            save(); // Use function directly
+        }
+    });
 
-	$: {
-		isModified = textContent !== initialContent;
-		if (onModified) {
-			onModified(isModified);
-		}
-	}
+    $effect(() => {
+        isModified = textContent !== initialContent;
+        if (onModified) {
+            onModified(isModified);
+        }
+    });
 
 	function save() {
 		if (onSave && isModified) {
@@ -47,16 +133,18 @@
 	}
 
 	// Auto-focus editor when focusArea switches to 'editor'
-	$: if ($focusArea === 'editor') {
-		if (isCodeFile && codeMirrorEditor) {
-			codeMirrorEditor.focus();
-		} else if (!isCodeFile && tiptapEditor) {
-			const tiptap = tiptapEditor.getEditor();
-			if (tiptap && !tiptap.isFocused) {
-				tiptap.commands.focus();
-			}
-		}
-	}
+    $effect(() => {
+        if ($focusArea === 'editor') {
+            if (isCodeFile && codeMirrorEditor) {
+                codeMirrorEditor.focus();
+            } else if (!isCodeFile && tiptapEditor) {
+                const tiptap = tiptapEditor.getEditor();
+                if (tiptap && !tiptap.isFocused) {
+                    tiptap.commands.focus();
+                }
+            }
+        }
+    });
 
 	function handleContentUpdate(newContent: string) {
 		textContent = newContent;
@@ -77,29 +165,61 @@
 		aiContext = {
 			...ctx,
 			fullFileContent: textContent,
-            editor: editorInst // Attach editor instance for AIPalette
+            editor: editorInst
 		};
 		showAIPalette = true;
 	}
 
+	function handleCommand(id: string) {
+		if (isCodeFile || !tiptapEditor) return;
+		const tiptap = tiptapEditor.getEditor();
+		if (!tiptap) return;
+
+		switch (id) {
+			case 'tasks':
+				tiptap.chain().focus().toggleTaskList().run();
+				break;
+			case 'heading1':
+				tiptap.chain().focus().toggleHeading({ level: 1 }).run();
+				break;
+			case 'heading2':
+				tiptap.chain().focus().toggleHeading({ level: 2 }).run();
+				break;
+			case 'bullet-list':
+				tiptap.chain().focus().toggleBulletList().run();
+				break;
+			case 'ordered-list':
+				tiptap.chain().focus().toggleOrderedList().run();
+				break;
+			case 'code-block':
+				tiptap.chain().focus().setCodeBlock().run();
+				break;
+			case 'quote':
+				tiptap.chain().focus().toggleBlockquote().run();
+				break;
+			case 'divider':
+				tiptap.chain().focus().setHorizontalRule().run();
+				break;
+		}
+	}
 </script>
 
-	<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-	<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div 
 		class="file-editor" 
 		class:focused={$focusArea === 'editor'}
-		on:click={() => focusArea.set('editor')}
-		on:keydown={() => focusArea.set('editor')}
+		onclick={() => focusArea.set('editor')}
+		onkeydown={() => focusArea.set('editor')}
 		role="region"
 		aria-label="File Editor"
 		tabindex="0"
 	>
-	<div class="editor-container" style="font-size: {$settingsStore.zoomLevel}rem; line-height: 1.6;">
+	<div class="editor-container" style="font-size: {$settingsStore.zoomLevel}rem; line-height: 1.6; {backgroundStyle}">
 		{#if isCodeFile}
 			<CodeMirrorEditor
 				bind:this={codeMirrorEditor}
-				content={content}
+				content={textContent}
 				{language}
 				onUpdate={handleContentUpdate}
 				onSave={save}
@@ -108,7 +228,7 @@
 		{:else}
 			<TipTapEditor
 				bind:this={tiptapEditor}
-				content={content}
+				content={textContent}
 				mode="markdown"
 				{language}
 				onUpdate={handleContentUpdate}
@@ -125,7 +245,7 @@
 		context={aiContext}
 		editor={isCodeFile ? null : tiptapEditor?.getEditor()}
 		codeMirrorEditor={isCodeFile ? codeMirrorEditor : null}
-		on:close={() => (showAIPalette = false)}
+		onClose={() => (showAIPalette = false)}
 	/>
 {/if}
 
@@ -158,4 +278,5 @@
 		padding: 1.5rem;
 		min-height: 100%;
 	}
+
 </style>

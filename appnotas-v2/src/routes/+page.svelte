@@ -12,10 +12,12 @@
 		setNotesDirectory,
 		createNoteFile,
 		saveNoteToFile,
-		deleteNoteFile
+		deleteNoteFile,
+		reloadNoteFromDisk,
+		applyExternalContent
 	} from '$lib/stores/notes';
 	import { openFiles, activeFile, currentDirectory, terminalVisible, terminalHeight } from '$lib/stores/files';
-	import { commandPaletteOpen, setupGlobalShortcuts, settingsOpen, activeTab } from '$lib/stores/shortcuts';
+	import { saveRequested, commandPaletteOpen, colorChangeRequested, setupGlobalShortcuts, settingsOpen, activeTab } from '$lib/stores/shortcuts';
 	import { focusArea } from '$lib/stores/focus';
 	import { settingsStore } from '$lib/stores/settings';
     import { aiState } from '$lib/stores/ai';
@@ -24,46 +26,56 @@
 
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import FileEditor from '$lib/components/FileEditor.svelte';
-	import CommandPalette from '$lib/components/CommandPalette.svelte';
+	import ColorPalette from '$lib/components/ColorPalette.svelte';
 	import NoteEditor from '$lib/components/NoteEditor.svelte';
 	import PDFView from '$lib/components/PDFView.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import Terminal from '$lib/components/Terminal.svelte';
+	import RefreshDiffModal from '$lib/components/RefreshDiffModal.svelte';
 	import { detectLanguage } from '$lib/utils/files';
 
-	let loading = true;
-	let error = '';
-	let focusedTabIndex = -1;
-	let tabsContainer: HTMLElement;
+	let loading = $state(true);
+	let error = $state('');
+	let focusedTabIndex = $state(-1);
+	let tabsContainer = $state<HTMLElement>();
+
+	// Refresh feature state
+	let showDiffModal = $state(false);
+	let diffOldContent = $state('');
+	let diffNewContent = $state('');
+	let diffNoteTitle = $state('');
+	let diffNoteId = $state('');
+	let isRefreshing = $state(false);
 
 	// Sync focusedTabIndex with activeFile ONLY when not explicitly navigating the toolbar
-	$: if ($openFiles.length > 0) {
-		if ($focusArea !== 'file-tabs') {
-			const idx = $activeFile ? $openFiles.findIndex(f => f.path === $activeFile.path) : -1;
-			if (idx !== -1) {
-				focusedTabIndex = idx;
-			} else if (focusedTabIndex >= $openFiles.length) {
-				focusedTabIndex = $openFiles.length - 1;
-			} else if (focusedTabIndex === -1) {
-				focusedTabIndex = 0;
-			}
-		}
-	} else {
-		focusedTabIndex = -1;
-	}
+	// Sync focusedTabIndex with activeFile ONLY when not explicitly navigating the toolbar
+    $effect(() => {
+        if ($openFiles.length > 0) {
+            if ($focusArea !== 'file-tabs') {
+                const idx = $activeFile ? $openFiles.findIndex(f => f.path === $activeFile.path) : -1;
+                if (idx !== -1) {
+                    focusedTabIndex = idx;
+                } else if (focusedTabIndex >= $openFiles.length) {
+                    focusedTabIndex = $openFiles.length - 1;
+                } else if (focusedTabIndex === -1) {
+                    focusedTabIndex = 0;
+                }
+            }
+        } else {
+            focusedTabIndex = -1;
+        }
+    });
 
 	// Auto-focus toolbar when focusArea switches to 'file-tabs'
-	$: if ($focusArea === 'file-tabs' && tabsContainer) {
-		// One-time sync when entering the area
-		const idx = $activeFile ? $openFiles.findIndex(f => f.path === $activeFile.path) : -1;
-		if (idx !== -1) focusedTabIndex = idx;
-		
-		tick().then(() => {
-			if (document.activeElement !== tabsContainer) {
-				tabsContainer.focus();
-			}
-		});
-	}
+	$effect(() => {
+        if ($focusArea === 'file-tabs' && tabsContainer) {
+            tick().then(() => {
+                if (tabsContainer && document.activeElement !== tabsContainer) {
+                    tabsContainer.focus();
+                }
+            });
+        }
+    });
 
 	function handleToolbarKeyDown(e: KeyboardEvent) {
 		if ($focusArea !== 'file-tabs') return;
@@ -118,9 +130,9 @@
 			label: 'Save File',
 			description: 'Save the current file (Ctrl+S)',
 			action: () => {
-				if ($activeFile && handleSave) {
-					const editor = document.querySelector('.file-editor') as any;
-					if (editor?.save) editor.save();
+				if ($activeFile) {
+					saveRequested.set(true);
+					setTimeout(() => saveRequested.set(false), 100);
 				}
 			}
 		}
@@ -175,15 +187,18 @@
 
 	function closeCurrentTab() {
 		if ($activeFile) {
-			closeFile($activeFile);
+			closeFile($activeFile.path);
 		}
 	}
 
-	onMount(async () => {
+	onMount(() => {
 		console.log('🚀 App mounted, setting up shortcuts...');
 		setupGlobalShortcuts();
-		await settingsStore.init();
-		console.log('✅ Shortcuts initialized and settings loaded');
+        
+        // Use an IIFE for async setup
+        (async () => {
+            await settingsStore.init();
+            console.log('✅ Shortcuts initialized and settings loaded');
 
 		const dir = get(settingsStore).notesDirectory;
 
@@ -195,6 +210,8 @@
 				console.error('Failed to load saved notes directory:', e);
 			}
 		}
+
+		})();
 
 		const handleDirChange = async (e: any) => {
 			const newDir = e.detail;
@@ -217,6 +234,67 @@
 			window.removeEventListener('notes-directory-changed', handleDirChange);
 		};
 	});
+
+	// --- Refresh Feature (Manual Only) ---
+
+	async function checkForDiskChanges(note: Note) {
+		const diskContent = await reloadNoteFromDisk(note.id);
+		if (diskContent === null) return;
+
+		// Compare with current store content
+		if (diskContent.trim() !== note.content.trim()) {
+			diffOldContent = note.content;
+			diffNewContent = diskContent;
+			diffNoteTitle = note.title;
+			diffNoteId = note.id;
+			showDiffModal = true;
+		} else {
+			// Mtime changed but content is the same (e.g. only frontmatter touched)
+			if (note.path) {
+				const lastKnownMtime = await invoke<number>('get_file_mtime', { path: note.path });
+			}
+		}
+	}
+
+	async function handleManualRefresh() {
+		if (isRefreshing) return;
+		const note = $activeNote;
+		if (!note) return;
+
+		isRefreshing = true;
+		try {
+			await checkForDiskChanges(note);
+			if (!showDiffModal) {
+				// No changes detected, briefly flash the button
+				console.log('[Refresh] No external changes detected');
+			}
+		} finally {
+			isRefreshing = false;
+		}
+	}
+
+	function handleAcceptChanges() {
+		if (diffNoteId && diffNewContent !== undefined) {
+			applyExternalContent(diffNoteId, diffNewContent);
+			// Force re-key the editor by briefly unsetting activeNoteId
+			const id = diffNoteId;
+			activeNoteId.set(null);
+			tick().then(() => activeNoteId.set(id));
+		}
+		closeDiffModal();
+	}
+
+	function handleRejectChanges() {
+		closeDiffModal();
+	}
+
+	function closeDiffModal() {
+		showDiffModal = false;
+		diffOldContent = '';
+		diffNewContent = '';
+		diffNoteTitle = '';
+		diffNoteId = '';
+	}
 
 	async function handleFileClick(path: string) {
 		console.log('🔗 File link clicked in note:', path);
@@ -248,7 +326,7 @@
 				content,
 				modified: false,
 				language: detectLanguage(fileName),
-				type
+				type: type as any
 			};
 
 			openFiles.update((files) => {
@@ -317,6 +395,15 @@
 							<span class="icon">✨</span>
 						</div>
 					{/if}
+					<button 
+						class="btn-icon refresh-btn" 
+						class:spinning={isRefreshing}
+						on:click={handleManualRefresh}
+						title="Check for external changes"
+						disabled={!$activeNote || $activeTab !== 'notes'}
+					>
+						🔄
+					</button>
 					<button 
 						class="btn-icon terminal-toggle" 
 						class:active={$terminalVisible}
@@ -445,6 +532,23 @@
 					</div>
 				{/if}
 			{/if}
+
+			{#if showDiffModal}
+				<RefreshDiffModal
+					oldContent={diffOldContent}
+					newContent={diffNewContent}
+					noteTitle={diffNoteTitle}
+					on:accept={handleAcceptChanges}
+					on:reject={handleRejectChanges}
+				/>
+			{/if}
+
+			{#if $commandPaletteOpen}
+				<ColorPalette 
+					onSelect={(color) => colorChangeRequested.set(color)}
+					onClose={() => commandPaletteOpen.set(false)}
+				/>
+			{/if}
 		</div>
 
 		{#if $settingsOpen}
@@ -544,6 +648,29 @@
 	.terminal-toggle:hover {
 		color: #ccc;
 		background: #2a2a2a;
+	}
+
+	.refresh-btn {
+		font-size: 1rem;
+		transition: all 0.3s;
+	}
+
+	.refresh-btn:hover {
+		background: #2a2a2a;
+	}
+
+	.refresh-btn:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+
+	.refresh-btn.spinning {
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		from { transform: rotate(0deg); }
+		to { transform: rotate(360deg); }
 	}
 
 	.btn-primary {

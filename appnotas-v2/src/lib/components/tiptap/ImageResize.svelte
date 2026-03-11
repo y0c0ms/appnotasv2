@@ -2,17 +2,21 @@
     import { settingsStore } from '../../stores/settings';
 	import { NodeViewWrapper } from 'svelte-tiptap';
 
-	export let node: any;
-	export let updateAttributes: (attrs: any) => void;
+    interface Props {
+        node: any;
+        updateAttributes: (attrs: any) => void;
+    }
 
-	let resizing = false;
-	let startWidth = 0;
-	let startX = 0;
-	let startY = 0;
-    let aspectRatio = 1;
-	let activeHandle: 'br' | 'tl' | null = null;
+    let { node, updateAttributes }: Props = $props();
 
-    $: zoom = $settingsStore.zoomLevel || 1.0;
+	let resizing = $state(false);
+	let startWidth = $state(0);
+	let startX = $state(0);
+	let startY = $state(0);
+    let aspectRatio = $state(1);
+	let activeHandle = $state<'br' | 'tl' | null>(null);
+
+    let zoom = $derived($settingsStore.zoomLevel || 1.0);
 
 	function onMouseDown(e: MouseEvent, handle: 'br' | 'tl') {
 		e.preventDefault();
@@ -69,14 +73,14 @@
         />
 		<div 
             class="resizer-handle br" 
-            on:mousedown={(e) => onMouseDown(e, 'br')}
+            onmousedown={(e) => onMouseDown(e, 'br')}
             role="button"
             tabindex="0"
             aria-label="Resize from bottom right"
         ></div>
 		<div 
             class="resizer-handle tl" 
-            on:mousedown={(e) => onMouseDown(e, 'tl')}
+            onmousedown={(e) => onMouseDown(e, 'tl')}
             role="button"
             tabindex="0"
             aria-label="Resize from top left"

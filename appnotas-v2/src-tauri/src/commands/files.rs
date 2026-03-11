@@ -71,3 +71,15 @@ pub async fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
     
     Ok(entries)
 }
+
+#[tauri::command]
+pub async fn get_file_mtime(path: String) -> Result<u64, String> {
+    let metadata = fs::metadata(&path)
+        .map_err(|e| format!("Failed to get file metadata: {}", e))?;
+    let modified = metadata.modified()
+        .map_err(|e| format!("Failed to get modification time: {}", e))?;
+    let duration = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Time error: {}", e))?;
+    Ok(duration.as_millis() as u64)
+}

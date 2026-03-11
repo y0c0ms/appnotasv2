@@ -3,7 +3,8 @@
 	import { focusArea } from '$lib/stores/focus';
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { detectLanguage } from '$lib/utils/files';
-	import { tick } from 'svelte';
+	import { tick, onMount } from 'svelte';
+    import { homeDir } from '@tauri-apps/api/path';
 
 	interface FileEntry {
 		name: string;
@@ -12,40 +13,47 @@
 		size: number | null;
 	}
 
-	let entries: FileEntry[] = [];
-	let loading = false;
-	let error = '';
-	let selectedIndex = 0;
-	let treeContainer: HTMLElement;
-	let searchQuery = '';
-	let searchInput: HTMLInputElement;
+	let entries = $state<FileEntry[]>([]);
+	let loading = $state(false);
+	let error = $state('');
+	let selectedIndex = $state(0);
+	let treeContainer = $state<HTMLElement>();
+	let searchQuery = $state('');
+	let searchInput = $state<HTMLInputElement>();
 
 	// Filter entries based on search query
-	$: filteredEntries = searchQuery 
+	let filteredEntries = $derived(searchQuery 
 		? entries.filter(e => e.name.toLowerCase().includes(searchQuery.toLowerCase()))
-		: entries;
+		: entries
+    );
 
 	// Auto-focus search input when focusArea switches to 'file-search'
-	$: if ($focusArea === 'file-search' && searchInput) {
-		tick().then(() => {
-			if (document.activeElement !== searchInput) {
-				searchInput.focus();
-			}
-		});
-	}
+    $effect(() => {
+        if ($focusArea === 'file-search' && searchInput) {
+            tick().then(() => {
+                if (searchInput && document.activeElement !== searchInput) {
+                    searchInput.focus();
+                }
+            });
+        }
+    });
 
 	// Auto-focus container when focusArea switches to 'list' or entries load/change
-	$: if ($focusArea === 'list' && treeContainer && entries) {
-		tick().then(() => {
-			if (document.activeElement !== treeContainer) {
-				treeContainer.focus({ preventScroll: true });
-			}
-		});
-	}
+    $effect(() => {
+        if ($focusArea === 'file-tree' && treeContainer) {
+            tick().then(() => {
+                if (treeContainer && document.activeElement !== treeContainer) {
+                    treeContainer.focus({ preventScroll: true });
+                }
+            });
+        }
+    });
 
-	$: if (treeContainer && entries.length > 0) {
-		scrollToSelected(selectedIndex);
-	}
+    $effect(() => {
+        if (treeContainer && entries.length > 0) {
+            scrollToSelected(selectedIndex);
+        }
+    });
 
 	async function scrollToSelected(index: number) {
 		await tick();
@@ -56,9 +64,11 @@
 		}
 	}
 
-	$: if ($currentDirectory) {
-		loadDirectory($currentDirectory);
-	}
+    $effect(() => {
+        if ($currentDirectory) {
+            loadDirectory($currentDirectory);
+        }
+    });
 
 	async function loadDirectory(path: string) {
 		loading = true;
@@ -94,13 +104,11 @@
 				const language = detectLanguage(entry.name);
 				
 				// Determine file type based on language
-				let type: string;
+				let type: 'pdf' | 'text';
 				if (isPdf) {
 					type = 'pdf';
-				} else if (language === 'markdown') {
-					type = 'markdown';
 				} else {
-					type = 'code'; // JavaScript, Python, TypeScript, etc.
+					type = 'text'; // JavaScript, Python, TypeScript, etc.
 				}
 
 				if (isPdf) {
@@ -128,6 +136,7 @@
 				});
 				
 				activeFile.set(newFile);
+				focusArea.set('editor');
 			} catch (e) {
 				const errMsg = String(e);
 				// Check for UTF-8/encoding errors
@@ -179,9 +188,6 @@
 	}
 
 	// Initialize with user's home directory
-	import { onMount } from 'svelte';
-    import { homeDir } from '@tauri-apps/api/path';
-
 	onMount(async () => {
 		if (!$currentDirectory) {
             try {
@@ -209,28 +215,29 @@
 			placeholder="🔍 Filter files..."
 			bind:value={searchQuery}
 			bind:this={searchInput}
-			on:focus={() => focusArea.set('file-search')}
-			on:keydown|stopPropagation={(e) => {
+			onfocus={() => focusArea.set('file-search')}
+			onkeydown={(e) => {
+                e.stopPropagation();
 				if (e.key === 'Escape') {
 					searchQuery = '';
 					focusArea.set('list');
-					treeContainer.focus();
+					treeContainer?.focus();
 				} else if (e.key === 'ArrowDown' || e.key === 'Enter') {
 					e.preventDefault();
 					focusArea.set('list');
-					treeContainer.focus();
+					treeContainer?.focus();
 				}
 			}}
 		/>
 		{#if searchQuery}
-			<button class="clear-search" on:click={() => searchQuery = ''} title="Clear search">×</button>
+			<button class="clear-search" onclick={() => searchQuery = ''} title="Clear search">×</button>
 		{/if}
 	</div>
 
 	<div 
 		class="file-list" 
 		class:focused={$focusArea === 'list'}
-		on:keydown={handleKeyDown} 
+		onkeydown={handleKeyDown} 
 		tabindex="0"
 		role="listbox"
 		aria-label="File Explorer"
@@ -247,8 +254,8 @@
 						class="entry"
 						class:directory={entry.is_dir}
 						class:selected={i === selectedIndex}
-						on:click={() => handleClick(entry, i)}
-						on:mouseenter={() => (selectedIndex = i)}
+						onclick={() => handleClick(entry, i)}
+						onmouseenter={() => (selectedIndex = i)}
 					>
 						<span class="icon">{entry.is_dir ? '📁' : '📄'}</span>
 						<span class="name">{entry.name}</span>

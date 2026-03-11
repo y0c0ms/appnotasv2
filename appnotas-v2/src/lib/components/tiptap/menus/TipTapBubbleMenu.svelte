@@ -1,11 +1,15 @@
 <script lang="ts">
     import type { Editor } from '@tiptap/core';
 
-    export let editor: Editor;
-    export let mode: 'markdown' | 'code';
-    export let onAITrigger: () => void;
+    interface Props {
+        editor: Editor;
+        mode: 'markdown' | 'code';
+        onAITrigger: () => void;
+    }
 
-    let bubbleMenuElement: HTMLElement;
+    let { editor, mode, onAITrigger }: Props = $props();
+
+    let bubbleMenuElement = $state<HTMLElement>();
 
     // We can't use 'use:editor.registerBubbleMenu' easily in a subcomponent 
     // without passing the element back or handling it differently.
@@ -17,21 +21,21 @@
         <div class="bubble-menu">
             {#if mode === 'markdown'}
                 <button
-                    on:click={() => editor.chain().focus().toggleBold().run()}
+                    onclick={() => editor.chain().focus().toggleBold().run()}
                     class:active={editor.isActive('bold')}
                     title="Bold"
                 >
                     <b>B</b>
                 </button>
                 <button
-                    on:click={() => editor.chain().focus().toggleItalic().run()}
+                    onclick={() => editor.chain().focus().toggleItalic().run()}
                     class:active={editor.isActive('italic')}
                     title="Italic"
                 >
                     <i>I</i>
                 </button>
                 <button
-                    on:click={() => editor.chain().focus().toggleStrike().run()}
+                    onclick={() => editor.chain().focus().toggleStrike().run()}
                     class:active={editor.isActive('strike')}
                     title="Strikethrough"
                 >
@@ -39,14 +43,14 @@
                 </button>
             {/if}
             <button
-                on:click={() => editor.chain().focus().toggleCode().run()}
+                onclick={() => editor.chain().focus().toggleCode().run()}
                 class:active={editor.isActive('code')}
                 title="Inline Code"
             >
                 {'<>'}
             </button>
             <button
-                on:click={onAITrigger}
+                onclick={onAITrigger}
                 title="AI Assistant (Ctrl+Shift+Enter)"
                 class="ai-btn"
             >

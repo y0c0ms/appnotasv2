@@ -1,15 +1,19 @@
 <script lang="ts">
     import type { Editor } from '@tiptap/core';
 
-    export let editor: Editor;
+    interface Props {
+        editor: Editor;
+    }
+
+    let { editor }: Props = $props();
 </script>
 
 {#if editor}
     <div class="floating-menu">
-        <button on:click={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>H1</button>
-        <button on:click={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</button>
-        <button on:click={() => editor.chain().focus().toggleBulletList().run()}>• List</button>
-        <button on:click={() => editor.chain().focus().toggleTaskList().run()}>☑ Task</button>
+        <button onclick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>H1</button>
+        <button onclick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</button>
+        <button onclick={() => editor.chain().focus().toggleBulletList().run()}>• List</button>
+        <button onclick={() => editor.chain().focus().toggleTaskList().run()}>☑ Task</button>
     </div>
 {/if}
 

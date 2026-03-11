@@ -1,12 +1,12 @@
 {
-  "showEditorMenus": true,
+  "showEditorMenus": false,
   "customColors": {
     "ctrl1": "#ff4a4a",
     "ctrl2": "#4a9eff",
     "ctrl3": "#4aff4a"
   },
   "keybinds": {
-    "toggleMenus": "Control+k",
+    "toggleMenus": "Ctrl+K",
     "openSettings": "Ctrl+.",
     "newNote": "Control+n",
     "search": "Control+f",
@@ -21,10 +21,10 @@
     "switchTabs": "Ctrl+Tab",
     "aiTrigger": "Ctrl+T"
   },
-  "geminiKey": "AIzaSyCVzb0RSGGTawg58bxFJDQrIQFS7CEJOLM",
+  "geminiKey": "AIzaSyA-8N5jfk0n_--RFGbQpDZMmZpDps-QmoQ",
   "notesDirectory": "C:\\Users\\Utilizador\\Documents\\notes",
-  "lastActiveNoteId": "note-20260131-163235-note-jan-31-0432-pm.md",
-  "aiModelPreference": "gemini-flash-latest",
+  "lastActiveNoteId": "note-20260131-143635-note-jan-31-0236-pm.md",
+  "aiModelPreference": "gemini-2.5-flash",
   "zoomLevel": 1,
   "pinnedNoteIds": [
     "note-20260131-163235-note-jan-31-0432-pm.md"

@@ -1,5 +1,5 @@
 <script lang="ts">
-import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { activeNote, notesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
 	import {
 		colorChangeRequested,
@@ -7,23 +7,27 @@ import { onMount, onDestroy } from 'svelte';
 		fileInsertRequested,
 		listModeToggleRequested
 	} from '$lib/stores/shortcuts';
-	import { openFiles, activeFile } from '$lib/stores/files';
+	// import { openFiles, activeFile } from '$lib/stores/files'; // Unused ?
 	import { settingsStore } from '$lib/stores/settings';
 	import { focusArea } from '$lib/stores/focus';
-	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 	import TipTapEditor from './TipTapEditor.svelte';
 	import AIPalette from './AIPalette.svelte';
 	import CommandPalette from './CommandPalette.svelte';
 
-	let title = $activeNote?.title || '';
-	export let handleFileClick: (path: string) => void = () => {};
-	let editor: any;
+    interface Props {
+        handleFileClick?: (path: string) => void;
+    }
+
+    let { handleFileClick = () => {} }: Props = $props();
+
+	let title = $state($activeNote?.title || '');
+	let editor = $state<any>(undefined);
 	let saveTimeout: ReturnType<typeof setTimeout>;
-	let showCommandPalette = false;
-	let showAIPalette = false;
-	let aiContext: any = null;
-    let aiEditorInstance: any = null;
+	let showCommandPalette = $state(false);
+	let showAIPalette = $state(false);
+	let aiContext = $state<any>(null);
+    let aiEditorInstance = $state<any>(null);
 
 	onMount(() => {
 		settingsStore.init();
@@ -39,66 +43,77 @@ import { onMount, onDestroy } from 'svelte';
 	});
 
 	// Listen for color change requests
-	$: if ($colorChangeRequested && $activeNote) {
-		const color = $colorChangeRequested;
-		const colorMap: Record<string, string> = {
-			'red': $settingsStore.customColors.ctrl1,
-			'yellow': $settingsStore.customColors.ctrl2,
-			'green': $settingsStore.customColors.ctrl3,
-			'blue': '#4a9eff',
-			'default': 'inherit'
-		};
-		setNoteColor($activeNote.id, colorMap[color] || color);
-	}
+    $effect(() => {
+        if ($colorChangeRequested && $activeNote) {
+            const color = $colorChangeRequested;
+            const colorMap: Record<string, string> = {
+                'red': $settingsStore.customColors.ctrl1,
+                'yellow': $settingsStore.customColors.ctrl2,
+                'green': $settingsStore.customColors.ctrl3,
+                'blue': '#4a9eff',
+                'default': 'inherit'
+            };
+            setNoteColor($activeNote.id, colorMap[color] || color);
+            colorChangeRequested.set(''); // Prevent infinite effect loop
+        }
+    });
 
 	// Get color hex
-	$: colorHex = $activeNote?.color || 'default';
+	let colorHex = $derived($activeNote?.color || 'default');
 
 	// Calculate background style
-	$: backgroundStyle = colorHex === 'default' 
+	let backgroundStyle = $derived(colorHex === 'default' 
 		? 'background: #0d1117;' 
-		: `background: linear-gradient(180deg, ${colorHex}1A 0%, #0d1117 100%);`;
+		: `background: linear-gradient(180deg, ${colorHex}1A 0%, #0d1117 100%);`);
 	
-	$: borderStyle = 'border-left: none;';
+	const borderStyle = 'border-left: none;';
 
 	// Update title when active note changes
-	$: if ($activeNote) {
-		title = $activeNote.title;
-	}
+    $effect(() => {
+        if ($activeNote) {
+            title = $activeNote.title;
+        }
+    });
 
 	// Watch for list mode toggle from store
-	$: if ($listModeToggleRequested) {
-		handleCommand('tasks');
-	}
+    $effect(() => {
+        if ($listModeToggleRequested) {
+            handleCommand('tasks');
+        }
+    });
 
 	// Auto-focus editor when focusArea switches to 'editor'
-	$: if ($focusArea === 'editor' && editor) {
-		const tiptap = editor.getEditor();
-		if (tiptap && !tiptap.isFocused) {
-			tiptap.commands.focus();
-		}
-	}
+    $effect(() => {
+        if ($focusArea === 'editor' && editor) {
+            const tiptap = editor.getEditor();
+            if (tiptap && !tiptap.isFocused) {
+                tiptap.commands.focus();
+            }
+        }
+    });
 
 	// Local state to prevent global store thrashing & enable save-on-switch
-	let localContent = '';
-	let localTitle = '';
-	let currentNoteId = '';
-	let isDirty = false; // Track if we actually have unsaved changes
+	let localContent = $state('');
+	let localTitle = $state('');
+	let currentNoteId = $state('');
+	let isDirty = $state(false); // Track if we actually have unsaved changes
 
 	// Sync local state when active note changes
-	$: if ($activeNote && $activeNote.id !== currentNoteId) {
-		// If we were editing a note (currentNoteId) and it's dirty, save it NOW
-		if (currentNoteId && isDirty) {
-			saveSpecificNote(currentNoteId, localContent, localTitle);
-		}
+    $effect(() => {
+        if ($activeNote && $activeNote.id !== currentNoteId) {
+            // If we were editing a note (currentNoteId) and it's dirty, save it NOW
+            if (currentNoteId && isDirty) {
+                saveSpecificNote(currentNoteId, localContent, localTitle);
+            }
 
-		// Now switch context
-		currentNoteId = $activeNote.id;
-		localContent = $activeNote.content;
-		localTitle = $activeNote.title;
-		title = $activeNote.title; // Sync UI title
-		isDirty = false;
-	}
+            // Now switch context
+            currentNoteId = $activeNote.id;
+            localContent = $activeNote.content;
+            localTitle = $activeNote.title;
+            // title is handled by separate effect, but we can sync here too if strictly ordered
+            isDirty = false;
+        }
+    });
 
 	// Handle title input
 	function handleTitleInput() {
@@ -147,7 +162,7 @@ import { onMount, onDestroy } from 'svelte';
 		}
 	}
 	
-	// Legacy function for compatibility if needed, but we prefer saveSpecificNote
+	// Legacy function for compatibility
 	async function saveNote() {
 		if (currentNoteId) {
 			saveSpecificNote(currentNoteId, localContent, localTitle);
@@ -245,8 +260,8 @@ import { onMount, onDestroy } from 'svelte';
 {#if showCommandPalette}
 	<div 
 		class="command-palette-wrapper" 
-		on:click|self={() => (showCommandPalette = false)} 
-		on:keydown={(e) => e.key === 'Escape' && (showCommandPalette = false)}
+		onclick={(e) => { if (e.target === e.currentTarget) showCommandPalette = false; }}
+		onkeydown={(e) => { if (e.key === 'Escape') showCommandPalette = false; }}
 		role="button"
 		tabindex="0"
 		aria-label="Close command palette"
@@ -280,7 +295,7 @@ import { onMount, onDestroy } from 'svelte';
 	<AIPalette 
 		context={aiContext}
 		editor={aiEditorInstance}
-		on:close={() => (showAIPalette = false)}
+		onClose={() => (showAIPalette = false)}
 	/>
 {/if}
 
@@ -292,8 +307,8 @@ import { onMount, onDestroy } from 'svelte';
 	<input
 		class="note-title"
 		bind:value={title}
-		on:blur={() => isDirty && saveSpecificNote(currentNoteId, localContent, localTitle)}
-		on:input={handleTitleInput}
+		onblur={() => isDirty && saveSpecificNote(currentNoteId, localContent, localTitle)}
+		oninput={handleTitleInput}
 		placeholder="Note title..."
 	/>
 

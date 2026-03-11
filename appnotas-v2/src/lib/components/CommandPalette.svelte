@@ -12,20 +12,20 @@
 		{ id: 'style', label: '@style', description: 'Toggle editor formatting menus', icon: '✨' }
 	];
 
-	let searchQuery = '';
-	let selectedIndex = 0;
-	let inputElement: HTMLInputElement;
+	let searchQuery = $state('');
+	let selectedIndex = $state(0);
+	let inputElement = $state<HTMLInputElement>();
 
-	$: filteredCommands = commands.filter(cmd => 
+	let filteredCommands = $derived(commands.filter(cmd => 
 		cmd.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
 		cmd.description.toLowerCase().includes(searchQuery.toLowerCase())
-	);
+	));
 
-	$: {
-		if (selectedIndex >= filteredCommands.length) {
-			selectedIndex = Math.max(0, filteredCommands.length - 1);
-		}
-	}
+    $effect(() => {
+        if (selectedIndex >= filteredCommands.length) {
+            selectedIndex = Math.max(0, filteredCommands.length - 1);
+        }
+    });
 
 	onMount(() => {
 		inputElement?.focus();
@@ -77,7 +77,7 @@
 		<input
 			bind:this={inputElement}
 			bind:value={searchQuery}
-			on:keydown={handleKeyDown}
+			onkeydown={handleKeyDown}
 			placeholder="Search commands... (e.g. @code)"
 			class="search-input"
 		/>
@@ -87,8 +87,8 @@
 			<button 
 				class="command-item" 
 				class:selected={i === selectedIndex}
-				on:click={() => selectCommand(command.id)}
-				on:mouseenter={() => selectedIndex = i}
+				onclick={() => selectCommand(command.id)}
+				onmouseenter={() => selectedIndex = i}
 			>
 				<span class="command-icon">{command.icon}</span>
 				<div class="command-text">

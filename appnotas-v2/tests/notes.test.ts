@@ -1,43 +1,47 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { notes, activeNote } from '../src/lib/stores/notes';
+import { notesList, activeNote, activeNoteId } from '../src/lib/stores/notes';
 import type { Note } from '../src/lib/stores/notes';
 
 describe('Notes Store', () => {
     beforeEach(() => {
-        notes.set([]);
-        activeNote.set(null);
+        notesList.set([]);
+        activeNoteId.set(null);
     });
 
     it('should initialize with empty array', () => {
-        expect(get(notes)).toEqual([]);
+        expect(get(notesList)).toEqual([]);
     });
 
     it('should be able to add notes', () => {
         const testNotes: Note[] = [
             {
-                id: 1,
+                id: '1',
                 title: 'Test Note',
                 content: 'Test Content',
                 created_at: '2026-01-30T00:00:00Z',
                 updated_at: '2026-01-30T00:00:00Z',
+                tags: []
             },
         ];
 
-        notes.set(testNotes);
-        expect(get(notes)).toEqual(testNotes);
+        notesList.set(testNotes);
+        expect(get(notesList)).toEqual(testNotes);
     });
 
     it('should be able to set active note', () => {
         const testNote: Note = {
-            id: 1,
+            id: '1',
             title: 'Active Note',
             content: 'Active Content',
             created_at: '2026-01-30T00:00:00Z',
             updated_at: '2026-01-30T00:00:00Z',
+            tags: []
         };
 
-        activeNote.set(testNote);
+        notesList.set([testNote]);
+        activeNoteId.set('1');
+
         expect(get(activeNote)).toEqual(testNote);
     });
 });

@@ -97,6 +97,7 @@ pub fn run() {
             commands::files::read_file,
             commands::files::write_file,
             commands::files::list_directory,
+            commands::files::get_file_mtime,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

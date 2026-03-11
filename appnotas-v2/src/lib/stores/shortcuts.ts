@@ -44,7 +44,6 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
     if (e.altKey !== needsAlt) return false;
     if (e.metaKey !== needsMeta) return false;
 
-    // Check key (case-insensitive except for special keys)
     const eventKey = e.key.toLowerCase();
     const bindKey = key.toLowerCase();
 
@@ -232,6 +231,33 @@ export function setupGlobalShortcuts() {
             e.preventDefault();
             console.log('Toggle terminal');
             terminalVisible.update(v => !v);
+            return;
+        }
+
+        // AI Trigger (global)
+        if (matchesKeybind(e, keybinds.aiTrigger)) {
+            e.preventDefault();
+            console.log('[Shortcuts] Global AI trigger detected');
+            const event = new CustomEvent('app:ai-trigger');
+            window.dispatchEvent(event);
+            return;
+        }
+
+        // AI Accept (global)
+        if (matchesKeybind(e, keybinds.aiAccept)) {
+            e.preventDefault();
+            console.log('[Shortcuts] Global AI accept detected');
+            const event = new CustomEvent('app:ai-accept');
+            window.dispatchEvent(event);
+            return;
+        }
+
+        // AI Reject (global)
+        if (matchesKeybind(e, keybinds.aiReject)) {
+            e.preventDefault();
+            console.log('[Shortcuts] Global AI reject detected');
+            const event = new CustomEvent('app:ai-reject');
+            window.dispatchEvent(event);
             return;
         }
 

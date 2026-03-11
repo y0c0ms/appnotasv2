@@ -4,40 +4,47 @@
 	import type { Note } from '$lib/stores/notes';
 	import { tick } from 'svelte';
 
-	let selectedIndex = 0;
-	let listContainer: HTMLElement;
-	let searchInput: HTMLInputElement;
+	let selectedIndex = $state(0);
+	let listContainer = $state<HTMLElement>();
+	let searchInput = $state<HTMLInputElement>();
 
 	// Sort filtered notes: pinned first, then by updated_at (descending)
-	$: sortedNotes = [...$filteredNotes].sort((a, b) => {
+    // Note: $filteredNotes is a store value, so we use $derived to track it.
+	let sortedNotes = $derived([...$filteredNotes].sort((a, b) => {
 		if (a.pinned && !b.pinned) return -1;
 		if (!a.pinned && b.pinned) return 1;
 		// Secondary sort by date if needed, though filteredNotes might already be sorted
 		return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-	});
+	}));
 
-	$: if ($activeNoteId && sortedNotes.length > 0) {
-		const index = sortedNotes.findIndex(n => n.id === $activeNoteId);
-		if (index !== -1) selectedIndex = index;
-	}
+    $effect(() => {
+        if ($activeNoteId && sortedNotes.length > 0) {
+            const index = sortedNotes.findIndex(n => n.id === $activeNoteId);
+            if (index !== -1) selectedIndex = index;
+        }
+    });
 
 	// Auto-focus search input when focusArea is 'note-search'
-	$: if ($focusArea === 'note-search' && searchInput) {
-		tick().then(() => {
-			if (document.activeElement !== searchInput) {
-				searchInput.focus();
-			}
-		});
-	}
+    $effect(() => {
+        if ($focusArea === 'note-search' && searchInput) {
+            tick().then(() => {
+                if (searchInput && document.activeElement !== searchInput) {
+                    searchInput.focus();
+                }
+            });
+        }
+    });
 
 	// Auto-focus container when focusArea switches to 'list'
-	$: if ($focusArea === 'list' && listContainer) {
-		tick().then(() => {
-			if (document.activeElement !== listContainer && document.activeElement !== searchInput) {
-				listContainer.focus({ preventScroll: true });
-			}
-		});
-	}
+    $effect(() => {
+        if ($focusArea === 'list' && listContainer) {
+            tick().then(() => {
+                if (listContainer && document.activeElement !== listContainer && document.activeElement !== searchInput) {
+                    listContainer.focus({ preventScroll: true });
+                }
+            });
+        }
+    });
 
 	function selectNote(note: Note) {
 		activeNoteId.set(note.id);
@@ -79,16 +86,17 @@
 			placeholder="🔍 Search notes..." 
 			bind:value={$searchQuery}
 			bind:this={searchInput}
-			on:focus={() => focusArea.set('note-search')}
-			on:keydown|stopPropagation={(e) => {
+			onfocus={() => focusArea.set('note-search')}
+			onkeydown={(e) => {
+                e.stopPropagation(); // Stop propagation if intended
 				if (e.key === 'Escape') {
 					searchQuery.set('');
 					focusArea.set('list');
-					listContainer.focus();
+					listContainer?.focus();
 				} else if (e.key === 'ArrowDown' || e.key === 'Enter') {
 					e.preventDefault();
 					focusArea.set('list');
-					listContainer.focus();
+					listContainer?.focus();
 				}
 			}}
 		/>
@@ -97,7 +105,7 @@
 	<div 
 		class="notes-list" 
 		class:focused={$focusArea === 'list'}
-		on:keydown={handleKeyDown}
+		onkeydown={handleKeyDown}
 		tabindex="0"
 		role="listbox"
 		aria-label="Notes List"
@@ -113,7 +121,7 @@
 						class:active={$activeNoteId === note.id}
 						class:pinned={note.pinned}
 						class:selected={i === selectedIndex}
-						on:click={() => {
+						onclick={() => {
 							selectedIndex = i;
 							selectNote(note);
 						}}
@@ -128,7 +136,7 @@
 					</button>
 					<button 
 						class="pin-toggle" 
-						on:click|stopPropagation={() => toggleNotePin(note.id)}
+						onclick={(e) => { e.stopPropagation(); toggleNotePin(note.id); }}
 						title={note.pinned ? "Unpin note" : "Pin note"}
 					>
 						{note.pinned ? '×' : '📌'}

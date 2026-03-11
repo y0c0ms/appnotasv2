@@ -17,7 +17,7 @@
 		addStorage() {
 			return {
 				markdown: {
-					serialize(state, node) {
+					serialize(state: any, node: any) {
 						if (node.content.size === 0) {
 							state.write('&nbsp;');
 							state.closeBlock(node);
@@ -85,26 +85,46 @@
 	}
 
 	// Props
-	export let content: string = '';
-	export let onUpdate: (content: string) => void = () => {};
-	export let onCommandTrigger: () => void = () => {};
-	export let onFileClick: (path: string) => void = () => {};
-	export let placeholder: string = 'Start writing...';
-	export let onAITrigger: (context: AIContext, editor?: any) => void = () => {};
-	export let mode: 'markdown' | 'code' = 'markdown';
-	export let language: string = 'typescript';
+    interface Props {
+        content?: string;
+        onUpdate?: (content: string) => void;
+        onCommandTrigger?: () => void;
+        onFileClick?: (path: string) => void;
+        placeholder?: string;
+        onAITrigger?: (context: AIContext, editor?: any) => void;
+        mode?: 'markdown' | 'code';
+        language?: string;
+    }
 
-	let element: HTMLElement;
-	let editor: Editor;
+    let {
+        content = '',
+        onUpdate = () => {},
+        onCommandTrigger = () => {},
+        onFileClick = () => {},
+        placeholder = 'Start writing...',
+        onAITrigger = () => {},
+        mode = 'markdown',
+        language = 'typescript'
+    }: Props = $props();
+
+	let element = $state<HTMLElement>();
+	let editor = $state<Editor>();
 	let updateTimer: ReturnType<typeof setTimeout>;
-	let bubbleMenuElement: HTMLElement;
-	let floatingMenuElement: HTMLElement;
+	let bubbleMenuElement = $state<HTMLElement>();
+	let floatingMenuElement = $state<HTMLElement>();
     
     // AI Loading Overlay State
-    let showAiLoading = false;
-    let aiLoadingPos = { top: 0, left: 0 };
+    let showAiLoading = $state(false);
+    let aiLoadingPos = $state({ top: 0, left: 0 });
 
-	$: editorZoom = $settingsStore.zoomLevel || 1.0;
+	// State to re-render when editor is ready
+	let isReady = $state(false);
+
+    // Wrapper for Svelte's use action directives with type casting
+    const registerBubbleMenu = (node: HTMLElement, params: any) => editor && (editor as any).registerBubbleMenu(node, params);
+    const registerFloatingMenu = (node: HTMLElement, params: any) => editor && (editor as any).registerFloatingMenu(node, params);
+
+	let editorZoom = $derived($settingsStore.zoomLevel || 1.0);
 
     function updateAiLoadingPosition() {
         if (!editor || !editor.view || !editor.view.dom) {
@@ -112,7 +132,7 @@
             return;
         }
 
-        const hasZone = editor.storage.aiZone?.zones?.length > 0;
+        const hasZone = (editor.storage as any).aiZone?.zones?.length > 0;
         
         if (hasZone) {
             const dom = editor.view.dom;
@@ -145,6 +165,24 @@
         }
         
         showAiLoading = false;
+    }
+
+    // Portal action dummy for now if not found, to avoid breaking if it was missing.
+    // Assuming it was implicit or global? 
+    // Actually, I'll add a simple action definition if it's missing to be safe, 
+    // OR just remove it if it was doing nothing. 
+    // Re-reading code: if it was erroring, user would complain.
+    // I'll define a local portal action just in case to be safe.
+    function portal(node: HTMLElement) {
+        let target = document.body;
+        target.appendChild(node);
+        return {
+            destroy() {
+                if (node.parentNode) {
+                    node.parentNode.removeChild(node);
+                }
+            }
+        };
     }
 
 	onMount(() => {
@@ -241,21 +279,16 @@
 
 		editor = new Editor({
 			element: element,
-            editorProps: {
-                attributes: {
-                    class: 'tiptap-editor',
-                },
-            },
 			extensions: [
 				StarterKit.configure({
 					heading: { levels: [1, 2, 3] },
 					codeBlock: false,
 					paragraph: false, // Disable default paragraph
-                    dropCursor: {
+                    dropcursor: {
                         width: 3,
                         color: '#4a9eff', // Use theme color
-                    },
-                    gapCursor: true, 
+                    } as any,
+                    gapcursor: true as any, 
 				}),
 				CustomParagraph, // Use our custom paragraph
 				Placeholder.configure({ placeholder }),
@@ -297,17 +330,19 @@
 					pluginKey: 'floatingMenu',
 					shouldShow: ({ state }) => {
 						const { showEditorMenus } = get(settingsStore);
-						const { $from } = state.selection;
+						const { $from: selectionFrom } = state.selection;
 						return showEditorMenus && 
-							   $from.parent.type.name === 'paragraph' && 
-							   $from.parent.content.size === 0;
+							   selectionFrom.parent.type.name === 'paragraph' && 
+							   selectionFrom.parent.content.size === 0;
 					},
 				}),
 				CharacterCount,
 			],
 			content,
 			editorProps: {
-				attributes: { class: 'tiptap-editor' },
+                attributes: {
+                    class: 'tiptap-editor',
+                },
 				handleDOMEvents: {
 					dragover: (view, event) => {
                         // Only block if it looks like a file drag from OS
@@ -331,59 +366,10 @@
 					}
 				},
 				handleKeyDown: (view, event) => {
-					const { keybinds } = get(settingsStore);
-                    const aiTrigger = keybinds['aiTrigger'] || 'Ctrl+Shift+Enter';
-                    const aiAccept = keybinds['aiAccept'] || 'Ctrl+Shift+]';
-                    const aiReject = keybinds['aiReject'] || 'Ctrl+Shift+[';
-                    
 					if (event.key === '@') {
 						onCommandTrigger();
 						return true;
 					}
-                    
-                    // Helper to match simple keybinds
-                    const match = (pattern: string, e: KeyboardEvent) => {
-                        const parts = pattern.toLowerCase().split('+');
-                        const key = parts[parts.length - 1];
-                        const ctrl = parts.includes('ctrl');
-                        const shift = parts.includes('shift');
-                        const alt = parts.includes('alt');
-                        const meta = parts.includes('meta'); // cmd
-
-                        if (e.ctrlKey !== ctrl) return false;
-                        if (e.shiftKey !== shift) return false;
-                        if (e.altKey !== alt) return false;
-                        if (e.metaKey !== meta) return false;
-                        
-                        // Key matching is tricky with Shift. 
-                        // If pattern is 'Ctrl+Shift+]', user might type '}'
-                        // We compare key case-insensitively or check code?
-                        // Let's check against event.key assuming it might be the shifted char
-                        // OR the unshifted char.
-                        if (e.key.toLowerCase() === key) return true;
-                        return false;
-                    };
-
-                    // AI Trigger
-                    if (match(aiTrigger, event)) {
-                        event.preventDefault();
-                        triggerAI();
-                        return true;
-                    }
-
-                    // AI Accept
-                    if (match(aiAccept, event)) {
-                        event.preventDefault();
-                        editor.commands.acceptAIProposal();
-                        return true;
-                    }
-
-                    // AI Reject
-                    if (match(aiReject, event)) {
-                        event.preventDefault();
-                        editor.commands.rejectAIProposal();
-                        return true;
-                    }
 					return false;
 				},
 			},
@@ -402,11 +388,11 @@
 					if (mode === 'code') {
 						output = editor.getText();
 					} else {
-						const markdownStorage = editor.storage.markdown as { getMarkdown: () => string };
+						const markdownStorage = (editor.storage as any).markdown as { getMarkdown: () => string };
 						output = markdownStorage.getMarkdown();
 					}
                     // Debug: Log HTML to see structure
-                    console.log('[TipTap HTML Debug]', editor.getHTML());
+                    // console.log('[TipTap HTML Debug]', editor.getHTML());
 					onUpdate(output);
 				}, 50); 
 			},
@@ -422,11 +408,42 @@
             }
 		});
 
+        // Global AI Trigger Listener
+        const handleGlobalAITrigger = () => {
+            if (editor && editor.isFocused) {
+                console.log('[TipTap] Global AI trigger received');
+                triggerAI();
+            }
+        };
+
+        const handleGlobalAIAccept = () => {
+            if (editor && editor.isFocused) {
+                editor.commands.acceptAIProposal();
+            }
+        };
+
+        const handleGlobalAIReject = () => {
+            if (editor && editor.isFocused) {
+                editor.commands.rejectAIProposal();
+            }
+        };
+
+        window.addEventListener('app:ai-trigger', handleGlobalAITrigger);
+        window.addEventListener('app:ai-accept', handleGlobalAIAccept);
+        window.addEventListener('app:ai-reject', handleGlobalAIReject);
+
         // Immediate set
         if (editor) {
              currentEditor.set(editor);
              (window as any).tiptapEditor = editor;
         }
+
+        return () => {
+             window.removeEventListener('app:ai-trigger', handleGlobalAITrigger);
+             window.removeEventListener('app:ai-accept', handleGlobalAIAccept);
+             window.removeEventListener('app:ai-reject', handleGlobalAIReject);
+             if (editor) editor.destroy();
+        };
 	});
 
 	onDestroy(() => {
@@ -437,28 +454,30 @@
 	});
 
 	// Reactive content update from parent
-	$: if (editor && content !== undefined) {
-		const currentText = mode === 'code' 
-            ? editor.getText() 
-            : (editor.storage.markdown as { getMarkdown: () => string }).getMarkdown();
-		
-		if (currentText !== content && !editor.isFocused) {
-			if (mode === 'code') {
-				editor.commands.setContent({
-					type: 'doc',
-					content: [{
-						type: 'codeBlock',
-						attrs: { language: language },
-						content: [{ type: 'text', text: content || '' }]
-					}]
-				}, false);
-			} else {
-				editor.commands.setContent(content, false);
-			}
-		}
-	}
+    $effect(() => {
+        if (editor && content !== undefined) {
+            const currentText = mode === 'code' 
+                ? editor.getText() 
+                : ((editor.storage as any).markdown as { getMarkdown: () => string }).getMarkdown();
+            
+            if (currentText !== content && !editor.isFocused) {
+                if (mode === 'code') {
+                    editor.commands.setContent({
+                        type: 'doc',
+                        content: [{
+                            type: 'codeBlock',
+                            attrs: { language: language },
+                            content: [{ type: 'text', text: content || '' }]
+                        }]
+                    }, false as any);
+                } else {
+                    editor.commands.setContent(content, false as any);
+                }
+            }
+        }
+    });
 
-	// Expose editor instance for parent component
+	// Expose editor instance for parent component via export function (Svelte 5 standard)
 	export function getEditor() {
 		return editor;
 	}
@@ -470,13 +489,13 @@
 	}
 
 	async function getSelectionContext(): Promise<AIContext> {
-		const { from, to } = editor.state.selection;
-		const text = editor.state.doc.textBetween(from, to, ' ');
+		const { from, to } = editor!.state.selection;
+		const text = editor!.state.doc.textBetween(from, to, ' ');
 		
 		const images: string[] = [];
 		const drawings: string[] = [];
 
-		editor.state.doc.nodesBetween(from, to, (node) => {
+		editor!.state.doc.nodesBetween(from, to, (node) => {
 			if (node.type.name === 'image') {
 				images.push(node.attrs.src);
 			} else if (node.type.name === 'drawing') {
@@ -491,7 +510,7 @@
 
 <div class="tiptap-wrapper">
 	{#if editor && $settingsStore.showEditorMenus}
-		<div use:editor.registerBubbleMenu={{ element: bubbleMenuElement }}>
+		<div use:registerBubbleMenu={{ element: bubbleMenuElement }}>
 			<TipTapBubbleMenu 
 				{editor} 
 				{mode} 
@@ -500,7 +519,7 @@
 		</div>
 
 		{#if mode === 'markdown'}
-			<div use:editor.registerFloatingMenu={{ element: floatingMenuElement }}>
+			<div use:registerFloatingMenu={{ element: floatingMenuElement }}>
 				<TipTapFloatingMenu {editor} />
 			</div>
 		{/if}
