@@ -190,7 +190,9 @@ export const AIProposal = Extension.create<AIProposalOptions>({
                             }
                         }
 
-                        setPendingProposals(this.storage.proposals.length);
+                        requestAnimationFrame(() => {
+                            setPendingProposals(this.storage.proposals.length);
+                        });
                         return set;
                     }
                 },

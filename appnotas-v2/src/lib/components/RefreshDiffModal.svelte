@@ -1,16 +1,16 @@
-<script lang="ts">
-    import { createEventDispatcher } from 'svelte';
-    import { fade } from 'svelte/transition';
 
-    const dispatch = createEventDispatcher();
+<script lang="ts">
+    import { fade } from 'svelte/transition';
 
     interface Props {
         oldContent: string;
         newContent: string;
         noteTitle: string;
+        onaccept: () => void;
+        onreject: () => void;
     }
 
-    let { oldContent, newContent, noteTitle }: Props = $props();
+    let { oldContent, newContent, noteTitle, onaccept, onreject }: Props = $props();
 
     interface DiffLine {
         type: 'added' | 'removed' | 'unchanged';
@@ -85,11 +85,11 @@
     }
 
     function accept() {
-        dispatch('accept');
+        onaccept();
     }
 
     function reject() {
-        dispatch('reject');
+        onreject();
     }
 </script>
 

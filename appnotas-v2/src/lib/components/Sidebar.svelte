@@ -2,6 +2,7 @@
 	import { activeTab } from '$lib/stores/shortcuts';
 	import NotesList from './NotesList.svelte';
 	import FileTree from './FileTree.svelte';
+	import TaskList from './TaskList.svelte';
 </script>
 
 <div class="sidebar">
@@ -20,13 +21,22 @@
 		>
 			📁 Files
 		</button>
+		<button 
+			class="tab" 
+			class:active={$activeTab === 'tasks'} 
+			on:click={() => ($activeTab = 'tasks')}
+		>
+			✅ Tasks
+		</button>
 	</div>
 
 	<div class="tab-content">
 		{#if $activeTab === 'notes'}
 			<NotesList />
-		{:else}
+		{:else if $activeTab === 'files'}
 			<FileTree />
+		{:else}
+			<TaskList />
 		{/if}
 	</div>
 </div>
@@ -39,6 +49,7 @@
 		border-right: 1px solid #2a2a2a;
 		display: flex; /* Restored */
 		flex-direction: column; /* Restored */
+		flex-shrink: 0;
 	}
 
 	/* Removed focus-within to prevent double borders */

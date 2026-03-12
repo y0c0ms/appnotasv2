@@ -16,21 +16,28 @@
 	}
 
 	let {
-		content: initial_content,
+		content,
 		language = 'markdown',
 		onSave = null,
 		onModified = null,
 		handleFileClick = () => {}
 	}: Props = $props();
+	
+	let textContent = $state(content);
+	let initialContent = $state(content);
 
 	let tiptapEditor = $state<any>(undefined);
 	let codeMirrorEditor = $state<any>(undefined);
 	
-	// We use state initialized from prop. 
-    // In Svelte 5, we can use $state with prop value directly, 
-    // but destructuring props is usually cleaner to avoid captures warning.
-	let textContent = $state(initial_content);
-	let initialContent = $state(initial_content);
+	// We use state initialized from prop.
+    // In Svelte 5, to avoid "captures initial value" warning, we use the props object directly
+
+	// Sync with prop changes if they happen (though usually handled by {#key} in parent)
+	$effect(() => {
+		textContent = content;
+		initialContent = content;
+	});
+
 	let isModified = $state(false);
 	
 	let showAIPalette = $state(false);
@@ -103,12 +110,7 @@
 		}
 	});
 
-	// Determine if this is a code file or markdown
 	let isCodeFile = $derived(language !== 'markdown');
-    
-    $effect(() => {
-        console.log(`[FileEditor] Language: ${language}, isCodeFile: ${isCodeFile}`);
-    });
 
 	// Watch for Ctrl+S
     $effect(() => {
@@ -146,8 +148,13 @@
         }
     });
 
+    let isFirstUpdate = true;
 	function handleContentUpdate(newContent: string) {
 		textContent = newContent;
+        if (isFirstUpdate) {
+            initialContent = newContent;
+            isFirstUpdate = false;
+        }
 	}
 
 	function handleCodeMirrorAI(ctx: { text: string; fullContent: string; selectionRange?: { from: number; to: number } }) {

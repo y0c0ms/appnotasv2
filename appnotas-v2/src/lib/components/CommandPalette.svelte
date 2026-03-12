@@ -1,25 +1,32 @@
 <script lang="ts">
 	import { createEventDispatcher, onMount } from 'svelte';
+	import { activeTab } from '$lib/stores/shortcuts';
 
 	const dispatch = createEventDispatcher();
 
 	const commands = [
-		{ id: 'code', label: '@code', description: 'Insert code snippet', icon: '📝' },
-		{ id: 'file', label: '@file', description: 'Link to a file', icon: '📁' },
-		{ id: 'tasks', label: '@tasks', description: 'Insert checklist', icon: '✅' },
-		{ id: 'image', label: '@image', description: 'Insert image', icon: '🖼️' },
-		{ id: 'drawing', label: '@drawing', description: 'Insert drawing', icon: '🎨' },
-		{ id: 'style', label: '@style', description: 'Toggle editor formatting menus', icon: '✨' }
+		{ id: 'code', label: '@code', description: 'Insert code snippet', icon: '📝', category: 'notes' },
+		{ id: 'file', label: '@file', description: 'Link to a file', icon: '📁', category: 'all' },
+		{ id: 'tasks', label: '@tasks', description: 'Insert checklist', icon: '✅', category: 'notes' },
+		{ id: 'image', label: '@image', description: 'Insert image', icon: '🖼️', category: 'notes' },
+		{ id: 'drawing', label: '@drawing', description: 'Insert drawing', icon: '🎨', category: 'notes' },
+		{ id: 'style', label: '@style', description: 'Toggle editor formatting menus', icon: '✨', category: 'notes' },
+		{ id: 'ai', label: '@AI', description: 'Ask AI for help', icon: '✨', category: 'all' }
 	];
 
 	let searchQuery = $state('');
 	let selectedIndex = $state(0);
 	let inputElement = $state<HTMLInputElement>();
 
-	let filteredCommands = $derived(commands.filter(cmd => 
-		cmd.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-		cmd.description.toLowerCase().includes(searchQuery.toLowerCase())
-	));
+	let filteredCommands = $derived(commands.filter(cmd => {
+        const matchesSearch = cmd.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+		                      cmd.description.toLowerCase().includes(searchQuery.toLowerCase());
+        
+        if ($activeTab === 'tasks') {
+            return matchesSearch && cmd.category === 'all';
+        }
+        return matchesSearch;
+    }));
 
     $effect(() => {
         if (selectedIndex >= filteredCommands.length) {

@@ -18,11 +18,6 @@
 			return {
 				markdown: {
 					serialize(state: any, node: any) {
-						if (node.content.size === 0) {
-							state.write('&nbsp;');
-							state.closeBlock(node);
-							return;
-						}
 						state.renderInline(node);
 						state.closeBlock(node);
 					},
@@ -65,6 +60,7 @@
 	import json from 'highlight.js/lib/languages/json';
 	import { settingsStore } from '$lib/stores/settings';
 	import { get } from 'svelte/store';
+	import { activeNote } from '$lib/stores/notes';
 
 	// Import modularized styles
 	import '../tiptap/TipTapEditor.css';
@@ -120,9 +116,17 @@
 	// State to re-render when editor is ready
 	let isReady = $state(false);
 
-    // Wrapper for Svelte's use action directives with type casting
-    const registerBubbleMenu = (node: HTMLElement, params: any) => editor && (editor as any).registerBubbleMenu(node, params);
-    const registerFloatingMenu = (node: HTMLElement, params: any) => editor && (editor as any).registerFloatingMenu(node, params);
+    // Safe wrappers for menu actions
+    const registerBubbleMenu = (node: HTMLElement, params: any) => {
+        if (editor && (editor as any).registerBubbleMenu) {
+            (editor as any).registerBubbleMenu(node, params);
+        }
+    };
+    const registerFloatingMenu = (node: HTMLElement, params: any) => {
+        if (editor && (editor as any).registerFloatingMenu) {
+            (editor as any).registerFloatingMenu(node, params);
+        }
+    };
 
 	let editorZoom = $derived($settingsStore.zoomLevel || 1.0);
 
@@ -273,25 +277,60 @@
                     opacity: 0.6;
                     color: #888;
                 }
+
+                /* File Link Widget Stylings */
+                .file-link-widget {
+                    display: inline-flex;
+                    align-items: center;
+                    background: #2a2a2a;
+                    border: 1px solid #3a3a3a;
+                    border-radius: 4px;
+                    padding: 0.1rem 0.5rem;
+                    margin: 0 0.2rem;
+                    color: #4a9eff;
+                    cursor: pointer;
+                    font-size: 0.9em;
+                    transition: all 0.2s;
+                    user-select: none;
+                    vertical-align: middle;
+                    line-height: 1.2;
+                }
+
+                .file-link-widget:hover {
+                    background: #3a3a3a;
+                    border-color: #4a9eff;
+                    color: #fff;
+                }
+
+                .file-link-widget svg {
+                    margin-right: 4px;
+                    opacity: 0.8;
+                }
             `;
             document.head.appendChild(style);
         }
+
+        const isTaskNote = $activeNote?.path?.includes('tasks') || $activeNote?.id?.startsWith('task-');
 
 		editor = new Editor({
 			element: element,
 			extensions: [
 				StarterKit.configure({
-					heading: { levels: [1, 2, 3] },
+					heading: isTaskNote ? false : { levels: [1, 2, 3] },
 					codeBlock: false,
-					paragraph: false, // Disable default paragraph
+					paragraph: false, 
+                    blockquote: isTaskNote ? false : {},
+                    horizontalRule: isTaskNote ? false : {},
+                    bulletList: isTaskNote ? false : {},
+                    orderedList: isTaskNote ? false : {},
                     dropcursor: {
                         width: 3,
-                        color: '#4a9eff', // Use theme color
+                        color: '#4a9eff',
                     } as any,
                     gapcursor: true as any, 
 				}),
 				CustomParagraph, // Use our custom paragraph
-				Placeholder.configure({ placeholder }),
+				Placeholder.configure({ placeholder: isTaskNote ? 'Add a task...' : placeholder }),
 				Markdown.configure({
 					html: true,
 					transformPastedText: true,
@@ -316,12 +355,22 @@
 				Drawing,
 				BlockSelection,
 				AIZone,
-				TaskList,
-				TaskItem.configure({ nested: true }),
+				TaskList.configure({
+                    HTMLAttributes: {
+                        class: 'tiptap-task-list',
+                    },
+                }),
+				TaskItem.configure({ 
+                    nested: true,
+                    HTMLAttributes: {
+                        class: 'tiptap-task-item',
+                    },
+                }),
 				AIProposal,
 				BubbleMenu.configure({
 					pluginKey: 'bubbleMenu',
 					shouldShow: ({ state, from, to }) => {
+                        if (isTaskNote) return false;
 						const { showEditorMenus } = get(settingsStore);
 						return showEditorMenus && from !== to;
 					},
@@ -329,6 +378,7 @@
 				FloatingMenu.configure({
 					pluginKey: 'floatingMenu',
 					shouldShow: ({ state }) => {
+                        if (isTaskNote) return false;
 						const { showEditorMenus } = get(settingsStore);
 						const { $from: selectionFrom } = state.selection;
 						return showEditorMenus && 
@@ -341,9 +391,28 @@
 			content,
 			editorProps: {
                 attributes: {
-                    class: 'tiptap-editor',
+                    class: `tiptap-editor ${isTaskNote ? 'task-mode' : ''}`,
                 },
 				handleDOMEvents: {
+                    paste: (view, event) => {
+                        if (isTaskNote) {
+                            event.preventDefault();
+                            const text = event.clipboardData?.getData('text/plain');
+                            if (text) {
+                                const lines = text.split('\n').filter(l => l.trim().length > 0);
+                                editor?.chain().focus().insertContent({
+                                    type: 'taskList',
+                                    content: lines.map(line => ({
+                                        type: 'taskItem',
+                                        attrs: { checked: false },
+                                        content: [{ type: 'paragraph', content: [{ type: 'text', text: line }] }]
+                                    }))
+                                }).run();
+                            }
+                            return true;
+                        }
+                        return false;
+                    },
 					dragover: (view, event) => {
                         // Only block if it looks like a file drag from OS
                         // Internal drags usually have different types or effects
@@ -367,14 +436,39 @@
 				},
 				handleKeyDown: (view, event) => {
 					if (event.key === '@') {
+                        // Prevent the character from being typed to avoid clean up later
+                        event.preventDefault();
 						onCommandTrigger();
 						return true;
 					}
+                    
+                    // Force task structure on Enter in task mode
+                    if (isTaskNote && event.key === 'Enter') {
+                        // After Enter, check if we need to toggle task list
+                        setTimeout(() => {
+                            if (editor && !editor.isActive('taskList')) {
+                                editor.commands.toggleTaskList();
+                            }
+                        }, 10);
+                    }
+
 					return false;
 				},
 			},
-            onTransaction: () => {
+            onTransaction: ({ transaction }) => {
                 requestAnimationFrame(updateAiLoadingPosition);
+                
+                // Absolute Task Enforcement - Only when focused to avoid loops during load
+                if (isTaskNote && editor && editor.isFocused && transaction.docChanged) {
+                    if (editor.isEmpty && !editor.isActive('taskList')) {
+                        editor.commands.toggleTaskList();
+                    } else if (!editor.isActive('taskList')) {
+                        const sel = editor.state.selection as any;
+                        if (sel.$from && sel.$from.parent.type.name !== 'taskItem') {
+                             editor.commands.toggleTaskList();
+                        }
+                    }
+                }
             },
             onSelectionUpdate: () => {
                 requestAnimationFrame(updateAiLoadingPosition);

@@ -22,6 +22,7 @@
         'zoomOut': 'Zoom Out',
         'aiTrigger': 'AI Trigger',
         'toggleTerminal': 'Toggle Terminal',
+        'toggleOverlay': 'Toggle Overlay',
     };
 
     let recordingShortcut: string | null = null;

@@ -23,8 +23,7 @@ struct NoteFrontmatter {
     color: Option<String>,
 }
 
-
-// Parse markdown frontmatter  
+// Parse markdown frontmatter
 fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
     if !content.starts_with("---") {
         return None;
@@ -42,7 +41,7 @@ fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
     let mut title = String::new();
     let mut created = String::new();
     let mut modified = String::new();
-    let mut tags = vec![];
+    let tags = vec![];
     let mut color = None;
 
     for line in frontmatter_str.lines() {
@@ -78,7 +77,7 @@ fn create_markdown(note: &Note) -> String {
     } else {
         String::new()
     };
-    
+
     format!(
         "---\ntitle: {}\ncreated: {}\nmodified: {}\ntags: [{}]\n{}---\n\n{}",
         note.title,
@@ -98,7 +97,7 @@ fn generate_filename(title: &str) -> String {
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-')
         .collect::<String>();
-    
+
     let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     format!("note-{}-{}.md", timestamp, slug)
 }
@@ -120,7 +119,8 @@ pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
             continue;
         }
 
-        let is_md = file_path.extension()
+        let is_md = file_path
+            .extension()
             .and_then(|s| s.to_str())
             .map(|s| s.to_lowercase() == "md")
             .unwrap_or(false);
@@ -135,7 +135,7 @@ pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
             };
 
             let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
-            
+
             let note = if let Some((frontmatter, body)) = parse_frontmatter(&content) {
                 Note {
                     id: filename.clone(),
@@ -171,12 +171,16 @@ pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
 }
 
 #[tauri::command]
-pub async fn create_note_file(
-    directory: String,
-    title: String,
-) -> Result<Note, String> {
+pub async fn create_note_file(directory: String, title: String) -> Result<Note, String> {
     let filename = generate_filename(&title);
-    let file_path = Path::new(&directory).join(&filename);
+    let path = Path::new(&directory);
+
+    // Ensure directory exists
+    if !path.exists() {
+        fs::create_dir_all(path).map_err(|e| e.to_string())?;
+    }
+
+    let file_path = path.join(&filename);
 
     let now = chrono::Utc::now().to_rfc3339();
     let note = Note {
@@ -197,19 +201,15 @@ pub async fn create_note_file(
 }
 
 #[tauri::command]
-pub async fn save_note_to_file(
-    path: String,
-    content: String,
-    title: String,
-) -> Result<(), String> {
+pub async fn save_note_to_file(path: String, content: String, title: String) -> Result<(), String> {
     // Read existing file to preserve frontmatter if possible, or just overwrite with basic structure
     let now = chrono::Utc::now().to_rfc3339();
-    
+
     // We recreate the note object just for saving
     let note = Note {
         id: String::new(), // Not needed for save
-        title: title,
-        content: content,
+        title,
+        content,
         path: Some(path.clone()),
         created_at: now.clone(), // This might be wrong if we don't have original, but usually enough for simple save
         updated_at: now,

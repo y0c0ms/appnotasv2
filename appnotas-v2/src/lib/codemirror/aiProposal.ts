@@ -112,8 +112,10 @@ export const proposalField = StateField.define<DecorationSet>({
             iter.next();
         }
 
-        // Sync to store
-        setPendingProposals(count);
+        // Sync to store - wrap in requestAnimationFrame to avoid Svelte 5 state mutation issues during update
+        requestAnimationFrame(() => {
+            setPendingProposals(count);
+        });
 
         return decorations;
     },

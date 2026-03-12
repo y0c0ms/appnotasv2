@@ -2,9 +2,13 @@
 	import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import { settingsStore } from '$lib/stores/settings';
-	import { EditorView, basicSetup } from 'codemirror';
-	import { EditorState, Compartment } from '@codemirror/state';
-	import { keymap } from '@codemirror/view';
+    import { EditorView, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, highlightActiveLine, keymap } from '@codemirror/view';
+    import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap, indentUnit, language as languageFacet } from '@codemirror/language';
+    import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
+    import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
+    import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+    import { lintKeymap } from '@codemirror/lint';
+	import { EditorState, Compartment, Prec } from '@codemirror/state';
 	import { javascript } from '@codemirror/lang-javascript';
 	import { python } from '@codemirror/lang-python';
 	import { html } from '@codemirror/lang-html';
@@ -12,10 +16,17 @@
 	import { json } from '@codemirror/lang-json';
 	import { markdown } from '@codemirror/lang-markdown';
 	import { oneDark } from '@codemirror/theme-one-dark';
+	import { rust } from '@codemirror/lang-rust';
+	import { cpp } from '@codemirror/lang-cpp';
+	import { java } from '@codemirror/lang-java';
+	import { php } from '@codemirror/lang-php';
+	import { go } from '@codemirror/lang-go';
+	import { sql } from '@codemirror/lang-sql';
+	import { yaml } from '@codemirror/lang-yaml';
+	import { xml } from '@codemirror/lang-xml';
 
     import { aiProposalExtension, addProposal, acceptProposal, rejectProposal, proposalField, getProposalAtCursor } from '../codemirror/aiProposal';
     import { aiLoadingExtension, setLoadingZone, clearLoadingZone } from '../codemirror/aiLoading';
-    import { Prec } from '@codemirror/state';
 
     interface Props {
         content?: string;
@@ -50,8 +61,18 @@
 			css: () => css(),
 			json: () => json(),
 			markdown: () => markdown(),
+			rust: () => rust(),
+			cpp: () => cpp(),
+			java: () => java(),
+			php: () => php(),
+			go: () => go(),
+			sql: () => sql(),
+			yaml: () => yaml(),
+			xml: () => xml(),
+			text: () => [],
 		};
-		return langMap[lang]?.() || javascript();
+		const ext = langMap[lang]?.() || javascript();
+        return ext;
 	}
 
 	onMount(() => {
@@ -104,7 +125,7 @@
 			'&.cm-focused': {
 				outline: 'none',
 			},
-			'.cm-selectionMatch': {
+            '.cm-selectionMatch': {
 				backgroundColor: 'rgba(56, 139, 253, 0.3)',
 			},
 		});
@@ -112,9 +133,34 @@
 		const state = EditorState.create({
 			doc: content,
 			extensions: [
-				basicSetup,
+                // Manual basicSetup equivalent to avoid clashes
+                lineNumbers(),
+                highlightActiveLineGutter(),
+                highlightSpecialChars(),
+                history(),
+                foldGutter(),
+                drawSelection(),
+                dropCursor(),
+                EditorState.allowMultipleSelections.of(true),
+                indentOnInput(),
+                syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+                bracketMatching(),
+                closeBrackets(),
+                rectangularSelection(),
+                highlightActiveLine(),
+                highlightSelectionMatches(),
+                keymap.of([
+                    ...closeBracketsKeymap,
+                    ...defaultKeymap,
+                    ...searchKeymap,
+                    ...historyKeymap,
+                    ...foldKeymap,
+                    ...lintKeymap
+                ] as any),
+
 				languageCompartment.of(getLanguageExtension(language)),
 				oneDark,
+                indentUnit.of('    '),
 				customTheme,
 				saveKeymap,
 				updateListener,
@@ -132,7 +178,6 @@
         
         const handleGlobalAITrigger = () => {
             if (document.activeElement?.closest('.codemirror-editor') === editorContainer) {
-                console.log('[CodeMirror] Global AI trigger received');
                 triggerAI();
             }
         };
@@ -251,13 +296,11 @@
             console.warn('[CodeMirrorEditor] setAIZone called but view is null');
             return;
         }
-        console.log(`[CodeMirrorEditor] setAIZone: ${from} - ${to}`);
         view.dispatch({ effects: setLoadingZone.of({ from, to }) });
     }
 
     export function unsetAIZone() {
         if (!view) return;
-        console.log('[CodeMirrorEditor] unsetAIZone');
         view.dispatch({ effects: clearLoadingZone.of(null as any) });
     }
 
@@ -273,8 +316,6 @@
         const id = Math.random().toString(36).substr(2, 9);
         const originalText = originalContent !== undefined ? originalContent : view.state.sliceDoc(from, to);
         
-        console.log(`[CodeMirrorEditor] insertAIProposal: from=${from}, to=${to}, id=${id}, contentLen=${content.length}`);
-
         view.dispatch({
             changes: { from, to, insert: content },
             effects: addProposal.of({
@@ -343,9 +384,9 @@
         let proposal: { from: number; to: number; originalText: string; id: string } | null = null;
         
         try {
-            const decorations = state.field(proposalField);
-            decorations.between(0, state.doc.length, (from, to, value) => {
-                const attrs = value.spec.attributes;
+            const decorations = state.field(proposalField as any) as any;
+            decorations.between(0, state.doc.length, (from: number, to: number, value: any) => {
+                const attrs = (value.spec as any).attributes;
                 if (attrs && attrs['data-proposal-id'] === id) {
                     proposal = { from, to, originalText: attrs['data-original-text'], id };
                     return false;

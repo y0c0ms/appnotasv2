@@ -112,14 +112,11 @@
 }
 
 /* Task Lists */
-/* Task Lists - Aggressive Fix with Explicit Classes */
 :global(.tiptap-editor .tiptap-task-list),
 :global(.tiptap-editor ul[data-type='taskList']) {
     list-style: none !important;
     padding: 0 !important;
     margin: 1rem 0;
-    border: 2px solid red !important;
-    /* Debug enabled */
 }
 
 :global(.tiptap-editor .tiptap-task-item),

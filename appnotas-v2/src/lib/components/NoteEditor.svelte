@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { activeNote, notesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
+	import { activeNote, notesList, taskNotesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
 	import {
 		colorChangeRequested,
 		codeInsertRequested,
@@ -98,20 +98,30 @@
 	let currentNoteId = $state('');
 	let isDirty = $state(false); // Track if we actually have unsaved changes
 
-	// Sync local state when active note changes
+	// Sync local state when active note changes (either ID or content)
     $effect(() => {
-        if ($activeNote && $activeNote.id !== currentNoteId) {
-            // If we were editing a note (currentNoteId) and it's dirty, save it NOW
-            if (currentNoteId && isDirty) {
-                saveSpecificNote(currentNoteId, localContent, localTitle);
-            }
+        if ($activeNote) {
+            if ($activeNote.id !== currentNoteId) {
+                // If we were editing a note (currentNoteId) and it's dirty, save it NOW
+                if (currentNoteId && isDirty) {
+                    saveSpecificNote(currentNoteId, localContent, localTitle);
+                }
 
-            // Now switch context
-            currentNoteId = $activeNote.id;
-            localContent = $activeNote.content;
-            localTitle = $activeNote.title;
-            // title is handled by separate effect, but we can sync here too if strictly ordered
-            isDirty = false;
+                // Now switch context
+                currentNoteId = $activeNote.id;
+                localContent = $activeNote.content;
+                localTitle = $activeNote.title;
+                // Sync the bound title too
+                title = $activeNote.title;
+                isDirty = false;
+            } else if ($activeNote.content !== localContent && !isDirty) {
+                // If the same note was updated externally (e.g. by Overlay) 
+                // and we don't have local unsaved changes, accept the new content.
+                console.log('🔄 Accepting external content update for:', $activeNote.title);
+                localContent = $activeNote.content;
+                localTitle = $activeNote.title;
+                title = $activeNote.title;
+            }
         }
     });
 
@@ -136,7 +146,8 @@
 	async function saveSpecificNote(id: string, content: string, noteTitle: string) {
 		try {
 			// Find the original note to preserve properties we aren't changing (like tags/colors)
-			const originalNote = $notesList.find(n => n.id === id);
+            const allNotes = [...$notesList, ...$taskNotesList];
+			const originalNote = allNotes.find(n => n.id === id);
 			if (!originalNote) return;
 
 			const updatedNote = {
@@ -194,12 +205,13 @@
 			});
 
 			if (selected && typeof selected === 'string') {
+                const name = selected.split(/[\\/]/).pop() || selected;
 				const tiptap = editor.getEditor();
 				if (tiptap) {
-					// Use our custom file-link extension or just text for now
+					// Use our custom file-link extension with name
 					tiptap.chain().focus().insertContent({
 						type: 'fileLink',
-						attrs: { path: selected }
+						attrs: { path: selected, name }
 					}).run();
 				}
 			}
@@ -243,6 +255,11 @@
 					attrs: { lines: [] }
 				}).run();
 				break;
+            case 'ai':
+                // Trigger AI logic
+                const event = new CustomEvent('app:ai-trigger');
+                window.dispatchEvent(event);
+                break;
 		}
 	}
 	

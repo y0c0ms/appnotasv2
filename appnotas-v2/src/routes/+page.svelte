@@ -2,7 +2,9 @@
 	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+	import { listen } from '@tauri-apps/api/event';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
+	import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 	import {
 		notesList,
 		activeNoteId,
@@ -14,7 +16,8 @@
 		saveNoteToFile,
 		deleteNoteFile,
 		reloadNoteFromDisk,
-		applyExternalContent
+		applyExternalContent,
+		taskNotesList
 	} from '$lib/stores/notes';
 	import { openFiles, activeFile, currentDirectory, terminalVisible, terminalHeight } from '$lib/stores/files';
 	import { saveRequested, commandPaletteOpen, colorChangeRequested, setupGlobalShortcuts, settingsOpen, activeTab } from '$lib/stores/shortcuts';
@@ -135,6 +138,12 @@
 					setTimeout(() => saveRequested.set(false), 100);
 				}
 			}
+		},
+		{
+			id: 'new-task',
+			label: 'New Task',
+			description: 'Create a new task list',
+			action: () => createNewNote('tasks')
 		}
 	];
 
@@ -155,8 +164,8 @@
 		}
 	}
 
-	async function createNewNote() {
-		console.log('createNewNote called, notesDirectory:', $notesDirectory);
+	async function createNewNote(subfolder?: string) {
+		console.log('createNewNote called, subfolder:', subfolder, 'notesDirectory:', $notesDirectory);
 		
 		// Check if notes directory is set for file-based notes
 		if ($notesDirectory) {
@@ -169,7 +178,8 @@
 					hour: '2-digit', 
 					minute: '2-digit' 
 				})}`;
-				const note = await createNoteFile(title);
+				const actualSubfolder = subfolder || ($activeTab === 'tasks' ? 'tasks' : undefined);
+				const note = await createNoteFile(title, actualSubfolder);
 				console.log('File-based note created:', note.id);
 			} catch (e) {
 				console.error('Failed to create file-based note:', e);
@@ -198,6 +208,7 @@
         // Use an IIFE for async setup
         (async () => {
             await settingsStore.init();
+            await initNotes(); // Start listening for sync events
             console.log('✅ Shortcuts initialized and settings loaded');
 
 		const dir = get(settingsStore).notesDirectory;
@@ -212,6 +223,34 @@
 		}
 
 		})();
+
+        // Listen for restore-main event from overlay
+        listen('restore-main', async (event: any) => {
+            console.log('📥 Received restore-main event:', event.payload);
+            const { tab, noteId } = event.payload || {};
+            
+            const win = getCurrentWebviewWindow();
+            await win.unminimize();
+            await win.show();
+            await win.setFocus();
+
+            if (tab) activeTab.set(tab);
+            if (noteId) activeNoteId.set(noteId);
+        });
+
+        // Listen for open-path event from overlay (Smart Redirection)
+        listen('open-path', async (event: any) => {
+            console.log('📥 Received open-path event:', event.payload);
+            const { path } = event.payload || {};
+            if (!path) return;
+
+            const win = getCurrentWebviewWindow();
+            await win.unminimize();
+            await win.show();
+            await win.setFocus();
+
+            handleSmartFileOpen(path);
+        });
 
 		const handleDirChange = async (e: any) => {
 			const newDir = e.detail;
@@ -294,6 +333,24 @@
 		diffNewContent = '';
 		diffNoteTitle = '';
 		diffNoteId = '';
+	}
+
+	async function handleSmartFileOpen(path: string) {
+		console.log('🔗 Smart opening file:', path);
+		
+		// Check if it's a note or task list first
+		const allNotes = [...get(notesList), ...get(taskNotesList)];
+		const existingNote = allNotes.find(n => n.path === path);
+
+		if (existingNote) {
+			const isTask = path.includes('tasks') || existingNote.id.startsWith('task-');
+			activeTab.set(isTask ? 'tasks' : 'notes');
+			activeNoteId.set(existingNote.id);
+			return;
+		}
+
+		// Otherwise, open in Files tab
+		handleFileClick(path);
 	}
 
 	async function handleFileClick(path: string) {
@@ -387,7 +444,9 @@
 	<div class="main-grid" class:show-settings={$settingsOpen}>
 		<div class="editor-section">
 			<header>
-				<h1>AppNotas</h1>
+				<div class="header-branding">
+					<img src="/src/lib/assets/nobg-icon.png" alt="AppNotas" class="header-logo" />
+				</div>
 				<div class="header-actions">
 					{#if $aiState.pendingProposals > 0}
 						<div class="ai-counter" title="Pending AI Proposals">
@@ -398,7 +457,7 @@
 					<button 
 						class="btn-icon refresh-btn" 
 						class:spinning={isRefreshing}
-						on:click={handleManualRefresh}
+						onclick={handleManualRefresh}
 						title="Check for external changes"
 						disabled={!$activeNote || $activeTab !== 'notes'}
 					>
@@ -407,19 +466,27 @@
 					<button 
 						class="btn-icon terminal-toggle" 
 						class:active={$terminalVisible}
-						on:click={() => terminalVisible.update(v => !v)} 
+						onclick={() => terminalVisible.update(v => !v)} 
 						title="Toggle Terminal (Ctrl+`)"
 					>
 						&gt;_
 					</button>
-					<button class="btn-icon" on:click={() => settingsOpen.update(v => !v)} title="Settings (Ctrl+,)">
+					<button class="btn-icon" onclick={() => settingsOpen.update(v => !v)} title="Settings (Ctrl+,)">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<circle cx="12" cy="12" r="3"></circle>
 							<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
 						</svg>
 					</button>
-					<button class="btn-primary" on:click={createNewNote}>
-						📝 New Note
+					<button 
+						class="btn-primary" 
+						class:tasks-btn={$activeTab === 'tasks'}
+						onclick={() => createNewNote($activeTab === 'tasks' ? 'tasks' : undefined)}
+					>
+						{#if $activeTab === 'tasks'}
+							✅ New Task
+						{:else}
+							📝 New Note
+						{/if}
 					</button>
 				</div>
 			</header>
@@ -436,7 +503,7 @@
 						aria-label="Open files tabs"
 						class="content-tabs" 
 						class:focused={$focusArea === 'file-tabs'}
-						on:keydown={handleToolbarKeyDown}
+						onkeydown={handleToolbarKeyDown}
 						bind:this={tabsContainer}
 					>
 						<div class="tabs-scroll">
@@ -448,7 +515,7 @@
 									<button
 										class="tab"
 										class:active={$activeFile?.path === file.path}
-										on:click={() => {
+										onclick={() => {
 											focusedTabIndex = i;
 											activeNoteId.set(null);
 											activeFile.set(file);
@@ -459,7 +526,7 @@
 											<span class="modified">●</span>
 										{/if}
 									</button>
-									<button class="close-button" on:click|stopPropagation={() => closeFile(file.path)}>
+									<button class="close-button" onclick={(e: MouseEvent) => { e.stopPropagation(); closeFile(file.path); }}>
 										✕
 									</button>
 								</div>
@@ -502,12 +569,12 @@
 						<!-- Notes Mode (Default) -->
 						{#if $activeNote}
 							{#key $activeNote.id}
-								<NoteEditor {handleFileClick} />
+								<NoteEditor handleFileClick={handleSmartFileOpen} />
 							{/key}
 						{:else}
 							<div class="empty-state">
-								<div class="empty-icon">📓</div>
-								<h2>Select a note to start writing</h2>
+								<div class="empty-icon">{$activeTab === 'tasks' ? '✅' : '📓'}</div>
+								<h2>{$activeTab === 'tasks' ? 'Select a task list to edit' : 'Select a note to start writing'}</h2>
 								<p>Or use <kbd>Ctrl+P</kbd> for commands</p>
 							</div>
 						{/if}
@@ -522,7 +589,7 @@
 					>
 						<button 
 							class="terminal-resize-handle"
-							on:mousedown={startTerminalResize}
+							onmousedown={startTerminalResize}
 							aria-label="Resize Terminal"
 						></button>
 						<Terminal 
@@ -538,8 +605,8 @@
 					oldContent={diffOldContent}
 					newContent={diffNewContent}
 					noteTitle={diffNoteTitle}
-					on:accept={handleAcceptChanges}
-					on:reject={handleRejectChanges}
+					onaccept={handleAcceptChanges}
+					onreject={handleRejectChanges}
 				/>
 			{/if}
 
@@ -615,9 +682,15 @@
 		background: #1a1a1a;
 	}
 
-	h1 {
-		font-size: 1.25rem;
-		margin: 0;
+	.header-branding {
+		display: flex;
+		align-items: center;
+	}
+
+	.header-logo {
+		height: 32px;
+		width: auto;
+		object-fit: contain;
 	}
 
 	.header-actions {
@@ -687,6 +760,14 @@
 
 	.btn-primary:hover {
 		background: #3a8eef;
+	}
+
+	.btn-primary.tasks-btn {
+		background: #a04dff;
+	}
+
+	.btn-primary.tasks-btn:hover {
+		background: #b373ff;
 	}
 
 	.content-tabs {

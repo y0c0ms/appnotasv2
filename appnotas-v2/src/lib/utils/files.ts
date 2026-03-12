@@ -31,25 +31,32 @@ export function detectLanguage(filename: string): string {
         // Rust
         rs: 'rust',
 
+        // C/C++
+        c: 'cpp',
+        cpp: 'cpp',
+        h: 'cpp',
+        hpp: 'cpp',
+        cc: 'cpp',
+        hh: 'cpp',
+
+        // Java
+        java: 'java',
+        class: 'java',
+
+        // PHP
+        php: 'php',
+
+        // Go
+        go: 'go',
+
         // Data formats
         json: 'json',
         xml: 'xml',
+        svg: 'xml',
         yaml: 'yaml',
         yml: 'yaml',
-        toml: 'text',
-
-        // Other languages
-        java: 'java',
-        c: 'c',
-        cpp: 'cpp',
-        h: 'c',
-        hpp: 'cpp',
-        go: 'go',
-        php: 'php',
-        rb: 'ruby',
-        sh: 'shell',
-        bash: 'shell',
         sql: 'sql',
+        toml: 'text',
 
         // Config files
         gitignore: 'text',

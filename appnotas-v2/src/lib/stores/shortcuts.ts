@@ -10,7 +10,7 @@ export const codeInsertRequested = writable(false);
 export const fileInsertRequested = writable(false);
 export const listModeToggleRequested = writable(false);
 export const settingsOpen = writable(false);
-export const activeTab = writable<'notes' | 'files'>('notes');
+export const activeTab = writable<'notes' | 'files' | 'tasks'>('notes');
 
 async function updateZoom(delta: number) {
     const settings = get(settingsStore);
@@ -134,7 +134,11 @@ export function setupGlobalShortcuts() {
         // Switch sidebar tabs
         if (matchesKeybind(e, keybinds.switchTabs)) {
             e.preventDefault();
-            activeTab.update(t => t === 'notes' ? 'files' : 'notes');
+            activeTab.update(t => {
+                if (t === 'notes') return 'files';
+                if (t === 'files') return 'tasks';
+                return 'notes';
+            });
             focusArea.set('list');
             console.log('Switched sidebar tab');
             return;

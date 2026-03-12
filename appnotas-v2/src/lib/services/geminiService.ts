@@ -24,8 +24,13 @@ class GeminiService {
         this.genAI = new GoogleGenerativeAI(apiKey);
     }
 
-    async generateResponse(prompt: string, context: AIContent, modelOverride?: AIModel): Promise<string> {
-        console.log(`[GeminiService] Generating response using model: ${modelOverride || 'default'}...`);
+    async generateResponse(
+        prompt: string, 
+        context: AIContent, 
+        modelOverride?: AIModel,
+        appContext: 'notes' | 'tasks' = 'notes'
+    ): Promise<string> {
+        console.log(`[GeminiService] Generating response using model: ${modelOverride || 'default'} for context: ${appContext}...`);
         this.init();
         if (!this.genAI) throw new Error("Failed to initialize Gemini AI.");
 
@@ -38,19 +43,25 @@ class GeminiService {
 
         const parts: (string | Part)[] = [];
 
-        // System instruction to ensure direct response
-        parts.push(`System Instruction: You are an AI assistant for a note-taking app and code editor. 
+        // Context-aware System Instruction
+        const notesSystemPrompt = `You are an AI assistant for a note-taking app and code editor. 
 - Provide ONLY the direct result of the user's instruction. 
-- Do NOT provide multiple options and do NOT ask the user to choose. 
-- Do NOT include any introductory or concluding remarks (e.g., "Here is the refactored code").
-- For code: Ensure consistent indentation (default to 2 spaces). Prioritize efficiency, readability, and modern best practices for the detected language.
+- Do NOT include any introductory or concluding remarks.
 - Return content in raw Markdown format suitable for direct insertion into a TipTap editor.
-- CRITICAL: When working with checklists or task lists, you MUST format each item as a separate line using "- [ ] item text" for unchecked tasks and "- [x] item text" for checked tasks. Each task MUST be on its own line. Never collapse multiple tasks into a single line. Preserve the checklist structure.
-- When the input contains checklist items (tasks with checkboxes), always return the result in the same checklist format with one item per line.\n\n`);
+- For code: Ensure consistent indentation (default to 2 spaces).`;
+
+        const tasksSystemPrompt = `You are an AI task assistant.
+- Provide ONLY a checklist/task list response.
+- Do NOT include any headers (#), introductory text, or concluding remarks.
+- Every single line MUST start with "- [ ] " (for unchecked) or "- [x] " (for checked).
+- Do NOT return plain paragraphs or code blocks unless they are part of a task item.
+- Return ONLY raw task list content.`;
+
+        parts.push(`System Instruction: ${appContext === 'tasks' ? tasksSystemPrompt : notesSystemPrompt}\n\n`);
 
         // 1. Add context text first if it exists
         if (context.text) {
-            parts.push(`Context text from note:\n${context.text}\n\n`);
+            parts.push(`Context text from ${appContext === 'tasks' ? 'tasks' : 'note'}:\n${context.text}\n\n`);
         }
 
         // 2. Add images/drawings

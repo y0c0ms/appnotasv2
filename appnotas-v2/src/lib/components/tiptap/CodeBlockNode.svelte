@@ -10,11 +10,15 @@
 
 	let { node, updateAttributes, extension }: Props = $props();
 
-	let languages = extension.options.lowlight.listLanguages();
+	let languages = $derived(extension.options.lowlight.listLanguages());
     
-    // Ensure common languages are top of list/available
-    if (!languages.includes('typescript')) languages.push('typescript');
-    languages.sort();
+    // We can't sort a derived array in-place, so we create a sorted copy
+    let sortedLanguages = $derived.by(() => {
+        const langs = [...languages];
+        if (!langs.includes('typescript')) langs.push('typescript');
+        langs.sort();
+        return langs;
+    });
 
 	let selectedLanguage = $derived(node.attrs.language || 'plaintext');
     let copyState = $state('Copy');
@@ -48,7 +52,7 @@
             <div class="lang-selector-group">
                 <select class="language-select" value={selectedLanguage} onchange={handleLanguageChange}>
                     <option value="plaintext">Plain Text</option>
-                    {#each languages as lang}
+                    {#each sortedLanguages as lang}
                         <option value={lang}>{lang}</option>
                     {/each}
                 </select>

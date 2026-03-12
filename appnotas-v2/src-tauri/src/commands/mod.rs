@@ -1,2 +1,2 @@
-pub mod notes;
 pub mod files;
+pub mod notes;

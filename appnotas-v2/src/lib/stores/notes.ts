@@ -1,6 +1,15 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { emit, listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { settingsStore } from './settings';
+
+let myWindowLabel = '';
+if (typeof window !== 'undefined') {
+    try {
+        myWindowLabel = getCurrentWebviewWindow().label;
+    } catch (e) {}
+}
 
 export interface Note {
     id: string;
@@ -20,26 +29,41 @@ export const notesDirectory = writable<string | null>(null);
 // List of all notes
 export const notesList = writable<Note[]>([]);
 
+// List of all task-specific notes (from /tasks subfolder)
+export const taskNotesList = writable<Note[]>([]);
+
 // Currently active note ID
 export const activeNoteId = writable<string | null>(null);
 
-// Search Query
+// Search Queries
 export const searchQuery = writable<string>('');
+export const taskSearchQuery = writable<string>('');
 
-// Sync activeNoteId to settings for persistence
-activeNoteId.subscribe(id => {
+// Sync activeNoteId and selectedTaskFileId to settings for persistence
+activeNoteId.subscribe((id: string | null) => {
     if (id) {
         settingsStore.update(s => ({ ...s, lastActiveNoteId: id }));
         settingsStore.save();
     }
 });
 
+// Currently selected task file for overlay
+export const selectedTaskFileId = writable<string | null>(null);
+
+selectedTaskFileId.subscribe((id: string | null) => {
+    if (id !== undefined) {
+        settingsStore.update(s => ({ ...s, selectedTaskFileId: id || '' }));
+        settingsStore.save();
+    }
+});
+
 // Derived: Get the active note object
 export const activeNote = derived(
-    [notesList, activeNoteId],
-    ([$notes, $activeId]) => {
+    [notesList, taskNotesList, activeNoteId],
+    ([$notes, $tasks, $activeId]) => {
         if (!$activeId) return null;
-        return $notes.find(n => n.id === $activeId) || null;
+        const allNotes = [...$notes, ...$tasks];
+        return allNotes.find(n => n.id === $activeId) || null;
     }
 );
 
@@ -52,10 +76,39 @@ export async function initNotes() {
         if (settings.notesDirectory) {
             notesDirectory.set(settings.notesDirectory);
             await loadNotes(settings.notesDirectory);
+            await loadTaskNotes(settings.notesDirectory);
+        }
+        if (settings.selectedTaskFileId) {
+            selectedTaskFileId.set(settings.selectedTaskFileId);
         }
     } catch (error) {
         console.error('Failed to init notes:', error);
     }
+
+    // Set up cross-window sync listener
+    listen('notes-updated', async (event) => {
+        const payload = event.payload as { source?: string };
+        if (payload?.source === myWindowLabel) return;
+
+        console.log('🔄 Sync event received from:', payload?.source || 'unknown');
+        
+        // Refresh settings from disk first to get updated directory/selection
+        await settingsStore.init();
+        const settings = get(settingsStore);
+        
+        if (settings.notesDirectory) {
+            notesDirectory.set(settings.notesDirectory);
+            console.log('🔄 Refreshing notes in current window for dir:', settings.notesDirectory);
+            await loadNotes(settings.notesDirectory);
+            await loadTaskNotes(settings.notesDirectory);
+        }
+
+        if (settings.selectedTaskFileId) {
+            selectedTaskFileId.set(settings.selectedTaskFileId);
+        }
+    });
+
+    console.log('📡 Notes sync listener active');
 }
 
 /**
@@ -67,9 +120,34 @@ export async function setNotesDirectory(directory: string) {
         await settingsStore.save();
         notesDirectory.set(directory);
         await loadNotes(directory);
+        await loadTaskNotes(directory);
+
+        // Notify other windows to refresh their directory/notes
+        await emit('notes-updated', {});
     } catch (error) {
         console.error('Failed to set notes directory:', error);
         throw error;
+    }
+}
+
+/**
+ * Load task-specific notes from the /tasks subfolder.
+ * Creates the folder if it doesn't exist.
+ */
+export async function loadTaskNotes(rootDirectory: string) {
+    try {
+        // Use a more robust path join if possible, but simple slash is usually ok with Path::new in Rust
+        const tasksPath = rootDirectory.replace(/[\\/]$/, '') + (rootDirectory.includes('\\') ? '\\tasks' : '/tasks');
+        
+        const notes = await invoke<Note[]>('list_notes_files', { directory: tasksPath }).catch(async (err) => {
+            console.warn('Tasks folder not accessible:', err);
+            return [];
+        });
+
+        taskNotesList.set(notes);
+    } catch (error) {
+        console.error('Failed to load task notes:', error);
+        taskNotesList.set([]);
     }
 }
 
@@ -106,24 +184,34 @@ export async function loadNotes(directory?: string) {
 /**
  * Create a new note file
  */
-export async function createNoteFile(title: string, directory?: string) {
+export async function createNoteFile(title: string, subfolder?: string) {
     try {
-        let dir = directory;
+        let dir = get(notesDirectory);
+        const settings = get(settingsStore);
         if (!dir) {
-            const settings = get(settingsStore);
             if (!settings.notesDirectory) {
                 throw new Error('No notes directory set');
             }
             dir = settings.notesDirectory;
         }
 
+        const targetDir = subfolder ? `${dir}/${subfolder}` : dir;
+
         const note = await invoke<Note>('create_note_file', {
-            directory: dir,
+            directory: targetDir,
             title
         });
 
-        notesList.update(notes => [note, ...notes]);
+        if (subfolder === 'tasks') {
+            taskNotesList.update(notes => [note, ...notes]);
+        } else {
+            notesList.update(notes => [note, ...notes]);
+        }
+        
         activeNoteId.set(note.id);
+
+        // Notify other windows
+        await emit('notes-updated', { source: myWindowLabel });
 
         return note;
     } catch (error) {
@@ -138,7 +226,9 @@ export async function createNoteFile(title: string, directory?: string) {
 export async function saveNoteToFile(id: string, content: string) {
     try {
         const notes = get(notesList);
-        const note = notes.find(n => n.id === id);
+        const tasks = get(taskNotesList);
+        const note = notes.find(n => n.id === id) || tasks.find(n => n.id === id);
+        
         if (!note || !note.path) throw new Error('Note or path not found');
 
         await invoke('save_note_to_file', {
@@ -147,13 +237,22 @@ export async function saveNoteToFile(id: string, content: string) {
             title: note.title
         });
 
-        // Update local state
+        // Update local state in both lists
         notesList.update(notes =>
             notes.map(n => n.id === id
                 ? { ...n, content, updated_at: new Date().toISOString() }
                 : n
             )
         );
+        taskNotesList.update(notes =>
+            notes.map(n => n.id === id
+                ? { ...n, content, updated_at: new Date().toISOString() }
+                : n
+            )
+        );
+
+        // Notify other windows
+        await emit('notes-updated', { source: myWindowLabel });
     } catch (error) {
         console.error('Failed to save note:', error);
         throw error;
@@ -206,15 +305,21 @@ export async function toggleNotePin(id: string) {
 export async function deleteNoteFile(id: string) {
     try {
         const notes = get(notesList);
-        const note = notes.find(n => n.id === id);
+        const tasks = get(taskNotesList);
+        const note = notes.find(n => n.id === id) || tasks.find(n => n.id === id);
+        
         if (!note || !note.path) throw new Error('Note or path not found');
 
         await invoke('delete_note_file', { path: note.path });
 
         notesList.update(notes => notes.filter(n => n.id !== id));
+        taskNotesList.update(notes => notes.filter(n => n.id !== id));
 
         // If deleted note was active, clear active note
         activeNoteId.update(activeId => activeId === id ? null : activeId);
+
+        // Notify other windows
+        await emit('notes-updated', { source: myWindowLabel });
     } catch (error) {
         console.error('Failed to delete note:', error);
         throw error;
@@ -229,6 +334,19 @@ export const filteredNotes = derived(
 
         const lowerQuery = $query.toLowerCase();
         return $notes.filter(note =>
+            note.title.toLowerCase().includes(lowerQuery) ||
+            note.content.toLowerCase().includes(lowerQuery)
+        );
+    }
+);
+
+export const filteredTaskNotes = derived(
+    [taskNotesList, taskSearchQuery],
+    ([$tasks, $query]) => {
+        if (!$query.trim()) return $tasks;
+
+        const lowerQuery = $query.toLowerCase();
+        return $tasks.filter(note =>
             note.title.toLowerCase().includes(lowerQuery) ||
             note.content.toLowerCase().includes(lowerQuery)
         );
@@ -269,4 +387,116 @@ export function applyExternalContent(id: string, newContent: string) {
     notesList.update(notes =>
         notes.map(n => n.id === id ? { ...n, content: newContent, updated_at: new Date().toISOString() } : n)
     );
+}
+
+/**
+ * Derived store that filters notes that appear to be task lists or are designated.
+ * It now uses the dedicated 'taskNotesList' for clean separation.
+ */
+export const taskNotes = derived(taskNotesList, ($tasks) => {
+    return $tasks;
+});
+
+// --- Task Overlay Logic ---
+
+export interface TaskItem {
+    id: string; // Note ID
+    taskId: string; // Unique task ID (noteId:lineIndex)
+    noteTitle: string;
+    text: string;
+    checked: boolean;
+    lineIndex: number; // For pinpointing in content
+}
+
+/**
+ * Derived store that aggregates tasks. 
+ * If a specific task file is selected, it only returns tasks from that file.
+ */
+export const allTasks = derived(
+    [notesList, taskNotesList, selectedTaskFileId], 
+    ([$notes, $tasks, $selectedId]) => {
+        const tasks: TaskItem[] = [];
+        
+        const allAvailableNotes = [...$notes, ...$tasks];
+        
+        const targetNotes = $selectedId 
+            ? allAvailableNotes.filter(n => n.id === $selectedId)
+            : allAvailableNotes;
+
+        targetNotes.forEach(note => {
+            const lines = note.content.split('\n');
+            lines.forEach((line, index) => {
+                const taskMatch = line.match(/^(\s*)[-*]\s*\[\s*([ xX])\s*\]\s*(.*)/);
+                if (taskMatch) {
+                    tasks.push({
+                        id: note.id,
+                        taskId: `${note.id}:${index}`,
+                        noteTitle: note.title,
+                        text: taskMatch[3].trim(),
+                        checked: taskMatch[2].toLowerCase() === 'x',
+                        lineIndex: index
+                    });
+                } else {
+                    const plainMatch = line.match(/^(\s*)\[\s*([ xX])\s*\]\s*(.*)/);
+                    if (plainMatch) {
+                        tasks.push({
+                            id: note.id,
+                            taskId: `${note.id}:${index}`,
+                            noteTitle: note.title,
+                            text: plainMatch[3].trim(),
+                            checked: plainMatch[2].toLowerCase() === 'x',
+                            lineIndex: index
+                        });
+                    }
+                }
+            });
+        });
+        return tasks;
+    }
+);
+
+/**
+ * Toggle a task's state in its source note and save it.
+ */
+export async function toggleTask(noteId: string, lineIndex: number, currentState: boolean) {
+    const notes = get(notesList);
+    const tasks = get(taskNotesList);
+    const note = notes.find(n => n.id === noteId) || tasks.find(n => n.id === noteId);
+    
+    if (!note) return;
+
+    const lines = note.content.split('\n');
+    const line = lines[lineIndex];
+    if (line) {
+        // Toggle [ ] to [x] or vice versa
+        const newState = !currentState;
+        lines[lineIndex] = line.replace(/\[[ xX]\]/, newState ? '[x]' : '[ ]');
+        const newContent = lines.join('\n');
+        
+        await saveNoteToFile(noteId, newContent);
+    }
+}
+
+/**
+ * Update a task's text in its source note and save it.
+ */
+export async function updateTaskText(noteId: string, lineIndex: number, newText: string) {
+    const notes = get(notesList);
+    const tasks = get(taskNotesList);
+    const note = notes.find(n => n.id === noteId) || tasks.find(n => n.id === noteId);
+    
+    if (!note) return;
+
+    const lines = note.content.split('\n');
+    const line = lines[lineIndex];
+    if (line !== undefined) {
+        // Find the prefix (e.g., "- [ ] " or "  - [x] ")
+        const prefixMatch = line.match(/^(\s*[-*]?\s*\[\s*[ xX]\s*\]\s*)/);
+        const prefix = prefixMatch ? prefixMatch[1] : (line.startsWith(' ') ? line.match(/^\s*/)?.[0] || '' : '');
+        
+        lines[lineIndex] = `${prefix}${newText}`;
+        const newContent = lines.join('\n');
+        
+        await saveNoteToFile(noteId, newContent);
+    }
 }

@@ -1,34 +1,33 @@
 {
-  "showEditorMenus": false,
+  "showEditorMenus": true,
   "customColors": {
     "ctrl1": "#ff4a4a",
     "ctrl2": "#4a9eff",
     "ctrl3": "#4aff4a"
   },
   "keybinds": {
+    "openPalette": "Ctrl+P",
+    "save": "Ctrl+S",
     "toggleMenus": "Ctrl+K",
-    "openSettings": "Ctrl+.",
-    "newNote": "Control+n",
-    "search": "Control+f",
+    "toggleChecklist": "Ctrl+L",
+    "openSettings": "Ctrl+,",
+    "switchTabs": "Ctrl+Tab",
     "focusLeft": "Ctrl+Shift+ArrowLeft",
     "focusRight": "Ctrl+Shift+ArrowRight",
-    "toggleTerminal": "Ctrl+,",
     "zoomIn": "Ctrl+=",
     "zoomOut": "Ctrl+-",
-    "save": "Ctrl+S",
-    "toggleChecklist": "Ctrl+L",
-    "openPalette": "Ctrl+P",
-    "switchTabs": "Ctrl+Tab",
-    "aiTrigger": "Ctrl+T"
+    "aiTrigger": "Ctrl+Shift+Enter",
+    "aiAccept": "Ctrl+Shift+]",
+    "aiReject": "Ctrl+Shift+[",
+    "toggleTerminal": "Ctrl+`"
   },
-  "geminiKey": "AIzaSyA-8N5jfk0n_--RFGbQpDZMmZpDps-QmoQ",
-  "notesDirectory": "C:\\Users\\Utilizador\\Documents\\notes",
-  "lastActiveNoteId": "note-20260131-143635-note-jan-31-0236-pm.md",
+  "geminiKey": "",
+  "notesDirectory": "",
+  "lastActiveNoteId": "",
   "aiModelPreference": "gemini-2.5-flash",
   "zoomLevel": 1,
-  "pinnedNoteIds": [
-    "note-20260131-163235-note-jan-31-0432-pm.md"
-  ],
+  "pinnedNoteIds": [],
   "autostart": false,
-  "defaultShell": "gitbash"
+  "defaultShell": "powershell",
+  "selectedTaskFileId": ""
 }

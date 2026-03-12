@@ -18,6 +18,7 @@ export interface AppSettings {
     pinnedNoteIds: string[];
     autostart: boolean;
     defaultShell: string;
+    selectedTaskFileId: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -42,16 +43,21 @@ const DEFAULT_SETTINGS: AppSettings = {
         'aiAccept': 'Ctrl+Shift+]',
         'aiReject': 'Ctrl+Shift+[',
         'toggleTerminal': 'Ctrl+`',
+        'toggleOverlay': 'Ctrl+Shift+L',
     },
     geminiKey: '',
     notesDirectory: '',
     lastActiveNoteId: '',
-    aiModelPreference: 'gemini-2.5-flash',
+    aiModelPreference: 'gemini-2.0-flash',
     zoomLevel: 1.0,
     pinnedNoteIds: [],
     autostart: false,
-    defaultShell: 'powershell'
+    defaultShell: 'powershell',
+    selectedTaskFileId: ''
 };
+
+let settingsPath = ''; 
+let settingsInitialized = false;
 
 function createSettingsStore() {
     const { subscribe, set, update } = writable<AppSettings>(DEFAULT_SETTINGS);
@@ -62,45 +68,68 @@ function createSettingsStore() {
         update,
         init: async () => {
             try {
-                // 1. Load settings file
-                const settingsJson = await invoke<string>('read_file', { path: '.settings.json' });
-                let loaded: Partial<AppSettings> = {};
+                // 1. Get the safe config path from Rust
+                settingsPath = await invoke<string>('get_config_path');
+                console.log('📂 Config path resolved:', settingsPath);
+
+                // 2. Try to read the file
+                const settingsJson = await invoke<string>('read_file', { path: settingsPath }).catch(() => null);
+                
                 if (settingsJson) {
-                    loaded = JSON.parse(settingsJson);
+                    try {
+                        const loaded = JSON.parse(settingsJson);
+                        set({
+                            ...DEFAULT_SETTINGS,
+                            ...loaded,
+                            autostart: await isEnabled().catch(() => false)
+                        });
+                        console.log('✅ Settings loaded from disk');
+                        
+                        // Sync loaded shortcuts to Rust
+                        if (loaded.keybinds?.toggleOverlay) {
+                            await invoke('update_shortcuts', { 
+                                overlay: loaded.keybinds.toggleOverlay, 
+                                main: 'Ctrl+Shift+Space' 
+                            }).catch(err => console.error('Failed to sync shortcuts on startup:', err));
+                        }
+
+                        settingsInitialized = true;
+                        return;
+                    } catch (e) {
+                        console.error('Failed to parse settings:', e);
+                    }
                 }
 
-                // 2. Sync with real system autostart state
-                let autostartState = false;
-                try {
-                    autostartState = await isEnabled();
-                    console.log('🔄 System Autostart Status:', autostartState);
-                } catch (e) {
-                    console.warn('Failed to check autostart status:', e);
-                }
-
-                // Merge: defaults < loaded < autostart state (System truth wins)
-                set({
-                    ...DEFAULT_SETTINGS,
-                    ...loaded,
-                    autostart: autostartState
-                });
-
-            } catch (err) {
-                console.log('No settings file found, using defaults');
-                // Create default settings file
+                // If we get here, no file was found or it was invalid
+                console.log('Using default settings');
+                set(DEFAULT_SETTINGS);
+                settingsInitialized = true;
+                
+                // Save initial defaults to the new safe path
                 await invoke('write_file', {
-                    path: '.settings.json',
+                    path: settingsPath,
                     content: JSON.stringify(DEFAULT_SETTINGS, null, 2)
                 });
+            } catch (err) {
+                console.error('Critical failure in settings init:', err);
             }
         },
         save: async () => {
+            if (!settingsPath) return;
             const current = get(settingsStore);
             try {
                 await invoke('write_file', {
-                    path: '.settings.json',
+                    path: settingsPath,
                     content: JSON.stringify(current, null, 2)
                 });
+                
+                // Sync shortcuts to Rust if they exist
+                if (current.keybinds.toggleOverlay && current.keybinds.openPalette) {
+                    await invoke('update_shortcuts', { 
+                        overlay: current.keybinds.toggleOverlay, 
+                        main: 'Ctrl+Shift+Space' // Hardcoded main for now or add to settings UI
+                    }).catch(err => console.error('Failed to sync shortcuts to Rust:', err));
+                }
             } catch (err) {
                 console.error('Failed to save settings:', err);
             }
@@ -110,7 +139,6 @@ function createSettingsStore() {
                 const newSettings = { ...s, showEditorMenus: !s.showEditorMenus };
                 return newSettings;
             });
-            settingsStore.save();
         },
         toggleAutostart: async () => {
             const current = get(settingsStore);
@@ -126,7 +154,6 @@ function createSettingsStore() {
                 }
 
                 settingsStore.update(s => ({ ...s, autostart: newState }));
-                await settingsStore.save();
 
             } catch (e) {
                 console.error('Failed to toggle autostart:', e);
@@ -138,3 +165,11 @@ function createSettingsStore() {
 }
 
 export const settingsStore = createSettingsStore();
+
+// Auto-save any change after initialization
+settingsStore.subscribe(async (s) => {
+    if (settingsInitialized) {
+        console.log('💾 Auto-saving settings to:', settingsPath);
+        await settingsStore.save();
+    }
+});
