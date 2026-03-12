@@ -2,6 +2,7 @@ mod commands;
 
 use std::str::FromStr;
 use std::sync::Mutex;
+use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Manager, WebviewWindowBuilder,

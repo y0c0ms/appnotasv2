@@ -28,8 +28,8 @@
 
 	// Sync with prop changes if they happen (though usually handled by {#key} in parent)
 	$effect(() => {
-		textContent = content;
-		initialContent = content;
+		textContent = props.content;
+		initialContent = props.content;
 	});
 
 	let isModified = $state(false);
@@ -115,14 +115,14 @@
 
     $effect(() => {
         isModified = textContent !== initialContent;
-        if (onModified) {
-            onModified(isModified);
+        if (props.onModified) {
+            props.onModified(isModified);
         }
     });
 
 	function save() {
-		if (onSave && isModified) {
-			onSave(textContent);
+		if (props.onSave && isModified) {
+			props.onSave(textContent);
 			initialContent = textContent;
 			isModified = false;
 		}
@@ -221,7 +221,7 @@
 			<CodeMirrorEditor
 				bind:this={codeMirrorEditor}
 				content={textContent}
-				{language}
+				language={props.language}
 				onUpdate={handleContentUpdate}
 				onSave={save}
 				onAITrigger={handleCodeMirrorAI}
