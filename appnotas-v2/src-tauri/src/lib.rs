@@ -32,9 +32,9 @@ pub fn run() {
 
                         if *shortcut == *config.main.lock().unwrap() {
                             if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.unminimize();
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                                let _: Result<(), _> = window.unminimize();
+                                let _: Result<(), _> = window.show();
+                                let _: Result<(), _> = window.set_focus();
                             }
                         } else if *shortcut == *config.overlay.lock().unwrap() {
                             toggle_todo_window(app);
@@ -57,9 +57,9 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                            let _: Result<(), _> = window.unminimize();
+                            let _: Result<(), _> = window.show();
+                            let _: Result<(), _> = window.set_focus();
                         }
                     }
                     "todo" => {
@@ -141,7 +141,7 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
     let main_window = app.get_webview_window("main");
     if let Some(window) = app.get_webview_window("todo") {
         if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
+            let _: Result<(), _> = window.hide();
             // Restore main if it was minimized? No, user wants overlay closed and main opened specifically via icon/event.
             // But if we toggle OFF, maybe we stay in current state.
         } else {
@@ -149,8 +149,8 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
             if let Some(main) = main_window {
                 let _ = main.minimize();
             }
-            let _ = window.show();
-            let _ = window.set_focus();
+            let _: Result<(), _> = window.show();
+            let _: Result<(), _> = window.set_focus();
         }
     } else {
         // Create the window if it doesn't exist
@@ -159,7 +159,7 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
 
         // Minimize main when creating overlay
         if let Some(main) = main_window {
-            let _ = main.minimize();
+            let _: Result<(), _> = main.minimize();
         }
 
         let mut builder = WebviewWindowBuilder::new(
@@ -170,10 +170,14 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
         .title("Mini AppNotas")
         .inner_size(width, height)
         .decorations(false)
-        .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            builder = builder.transparent(true);
+        }
 
         #[cfg(target_os = "windows")]
         {
@@ -188,8 +192,8 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
         }
 
         if let Ok(window) = builder.build() {
-            let _ = window.show();
-            let _ = window.set_focus();
+            let _: Result<(), _> = window.show();
+            let _: Result<(), _> = window.set_focus();
         }
     }
 }
