@@ -12,6 +12,7 @@
     import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 
     import { geminiService } from '$lib/services/geminiService';
+    import appIcon from '$lib/assets/nobg-icon.png';
 
     let loading = $state(true);
     let newTaskText = $state('');
@@ -360,7 +361,7 @@
     <header class="window-header">
         <div class="header-left">
             <button class="branding" onclick={returnToApp} title="Return to App">
-                <img src="/src/lib/assets/nobg-icon.png" alt="AppNotas" class="app-icon-img" />
+                <img src={appIcon} alt="AppNotas" class="app-icon-img" />
             </button>
         </div>
 
