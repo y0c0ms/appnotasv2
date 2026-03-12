@@ -18,8 +18,8 @@ A modern, high-performance note-taking application built with **Svelte** and **T
 
 | Platform | File |
 |----------|------|
-| **Windows** | [Download .exe Installer](bundle/AppNotas_0.1.0_x64-setup.exe) |
-| **Linux** | [Download .rpm Package](bundle/AppNotas-0.1.0-1.x86_64.rpm) |
+| **Windows** | [Download .exe Installer](https://github.com/y0c0ms/appnotasv2/releases/latest/download/AppNotas_0.1.0_x64-setup.exe) |
+| **Linux** | [Download .rpm Package](https://github.com/y0c0ms/appnotasv2/releases/latest/download/AppNotas-0.1.0-1.x86_64.rpm) |
 
 ## 🚀 Getting Started
 
@@ -47,7 +47,7 @@ bun run package
 bun run package:all
 ```
 
-**Note**: running `package:all` will automatically collect the `.exe` and `.rpm` files into a `bundle/` folder in the project root.
+**Note**: running `package:all` will automatically collect the final `.exe` and `.rpm` files into the `releases/` folder in the project root.
 
 #### Windows (NSIS)
 The `.exe` installer will be located at:
