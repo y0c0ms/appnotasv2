@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, Runtime, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -137,7 +137,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn toggle_todo_window(app: &tauri::AppHandle) {
+fn toggle_todo_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let main_window = app.get_webview_window("main");
     if let Some(window) = app.get_webview_window("todo") {
         if window.is_visible().unwrap_or(false) {
@@ -162,7 +162,7 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
             let _ = main.minimize();
         }
 
-        let mut builder = tauri::webview::WebviewWindowBuilder::new(
+        let mut builder = WebviewWindowBuilder::new(
             app,
             "todo",
             tauri::WebviewUrl::App("todo".into()),
