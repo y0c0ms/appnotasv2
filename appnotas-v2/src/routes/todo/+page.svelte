@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import { allTasks, toggleTask, updateTaskText, initNotes, createNoteFile, saveNoteToFile, notesList, taskNotes, selectedTaskFileId, deleteNoteFile, activeNoteId, taskNotesList } from '$lib/stores/notes';
     import { get } from 'svelte/store';
-    import { getCurrentWebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow';
+    import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
     import { emit, listen } from '@tauri-apps/api/event';
     import { activeTab } from '$lib/stores/shortcuts';
     import { settingsStore } from '$lib/stores/settings';

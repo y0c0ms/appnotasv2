@@ -15,16 +15,10 @@
 		handleFileClick?: (path: string) => void;
 	}
 
-	let {
-		content,
-		language = 'markdown',
-		onSave = null,
-		onModified = null,
-		handleFileClick = () => {}
-	}: Props = $props();
+	let props: Props = $props();
 	
-	let textContent = $state(content);
-	let initialContent = $state(content);
+	let textContent = $state(props.content);
+	let initialContent = $state(props.content);
 
 	let tiptapEditor = $state<any>(undefined);
 	let codeMirrorEditor = $state<any>(undefined);
@@ -110,7 +104,7 @@
 		}
 	});
 
-	let isCodeFile = $derived(language !== 'markdown');
+	let isCodeFile = $derived(props.language !== 'markdown');
 
 	// Watch for Ctrl+S
     $effect(() => {
@@ -237,10 +231,10 @@
 				bind:this={tiptapEditor}
 				content={textContent}
 				mode="markdown"
-				{language}
+				language={props.language}
 				onUpdate={handleContentUpdate}
 				onAITrigger={handleTipTapAI}
-				onFileClick={handleFileClick}
+				onFileClick={props.handleFileClick}
 				placeholder="Start editing file..."
 			/>
 		{/if}

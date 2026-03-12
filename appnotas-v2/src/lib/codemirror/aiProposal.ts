@@ -1,4 +1,4 @@
-import { StateField, StateEffect, RangeSet } from '@codemirror/state';
+import { StateField, StateEffect } from '@codemirror/state';
 import type { Extension, Range } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';

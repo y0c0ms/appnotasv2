@@ -3,7 +3,7 @@
     import { get } from 'svelte/store';
     import { settingsStore } from '$lib/stores/settings';
     import { EditorView, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, highlightActiveLine, keymap } from '@codemirror/view';
-    import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap, indentUnit, language as languageFacet } from '@codemirror/language';
+    import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap, indentUnit } from '@codemirror/language';
     import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
     import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
     import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';

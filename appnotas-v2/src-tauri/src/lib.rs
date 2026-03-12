@@ -2,10 +2,9 @@ mod commands;
 
 use std::str::FromStr;
 use std::sync::Mutex;
-use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, Runtime, WebviewWindowBuilder,
+    Manager, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -137,7 +136,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn toggle_todo_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+fn toggle_todo_window(app: &tauri::AppHandle) {
     let main_window = app.get_webview_window("main");
     if let Some(window) = app.get_webview_window("todo") {
         if window.is_visible().unwrap_or(false) {
