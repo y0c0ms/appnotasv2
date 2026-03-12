@@ -18,8 +18,8 @@ A modern, high-performance note-taking application built with **Svelte** and **T
 
 | Platform | File |
 |----------|------|
-| **Windows** | [Download .exe Installer](https://github.com/y0c0ms/appnotasv2/releases/latest/download/AppNotas_0.1.0_x64-setup.exe) |
-| **Linux** | [Download .rpm Package](https://github.com/y0c0ms/appnotasv2/releases/latest/download/AppNotas-0.1.0-1.x86_64.rpm) |
+| **Windows** | [Download .exe Installer](https://github.com/y0c0ms/appnotasv2/releases/latest/download/AppNotas_0.1.1_x64-setup.exe) |
+| **Linux** | [Download .rpm Package](https://github.com/y0c0ms/appnotasv2/releases/latest/download/AppNotas-0.1.1-1.x86_64.rpm) |
 
 ## 🚀 Getting Started
 
