@@ -154,7 +154,8 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
         }
     } else {
         // Create the window if it doesn't exist
-        let monitor = app.primary_monitor().ok().flatten();
+        let monitor = app.primary_monitor().ok().flatten()
+            .or_else(|| app.available_monitors().ok().and_then(|m| m.into_iter().next()));
         let (width, height) = (350.0, 500.0);
 
         // Hide main when creating overlay
@@ -179,21 +180,60 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
             builder = builder.transparent(true);
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(not(target_os = "macos"))]
         {
-            // Position in bottom right
-            if let Some(m) = monitor {
+            // Position in bottom right for Windows and Linux
+            if let Some(ref m) = monitor {
                 let screen_size = m.size();
                 let scale_factor = m.scale_factor();
                 let x = (screen_size.width as f64 / scale_factor) - width - 20.0;
                 let y = (screen_size.height as f64 / scale_factor) - height - 60.0; // Above taskbar
+                println!("🖥️ Monitor found! Position: ({}, {})", x, y);
                 builder = builder.position(x, y);
+            } else {
+                println!("⚠️ No primary monitor found!");
             }
         }
 
         if let Ok(window) = builder.build() {
+            println!("✅ Overlay window built successfully!");
+
+            // Explicitly set position again after build for Linux/Wayland consistency
+            #[cfg(not(target_os = "macos"))]
+            if let Some(ref m) = monitor {
+                let screen_size = m.size();
+                let scale_factor = m.scale_factor();
+                println!("🖥️ Screen size: {:?}, Scale: {}", screen_size, scale_factor);
+                
+                let x = (screen_size.width as f64 / scale_factor) - width - 20.0;
+                let y = (screen_size.height as f64 / scale_factor) - height - 60.0;
+                
+                let window_clone = window.clone();
+                // Capture owned values to avoid lifetime issues in async block
+                let width_val = width;
+                let height_val = height;
+                let screen_width = screen_size.width;
+                let screen_height = screen_size.height;
+
+                tauri::async_runtime::spawn(async move {
+                    // Longer delay to ensure the window is fully managed by the compositor
+                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                    println!("🚀 (1s Delayed) Moving to Logical({}, {})", x, y);
+                    let _ = window_clone.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+                    
+                    // Also try physical just in case logical is failing due to scale issues
+                    let px = (screen_width as f64) - (width_val * scale_factor) - (20.0 * scale_factor);
+                    let py = (screen_height as f64) - (height_val * scale_factor) - (60.0 * scale_factor);
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    println!("🚀 (Extra Delay) Moving to Physical({}, {})", px, py);
+                    let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(px as i32, py as i32)));
+                });
+            }
+
             let _: Result<(), _> = window.show();
             let _: Result<(), _> = window.set_focus();
+        } else {
+            println!("❌ Failed to build overlay window!");
         }
     }
 }

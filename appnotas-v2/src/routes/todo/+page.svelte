@@ -364,13 +364,7 @@
         <div class="header-left">
             <button class="branding" onclick={returnToApp} title="Return to App">
                 <div class="app-icon-container">
-                    <svg class="app-icon-logo" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: block;">
-                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-                        <path d="M8 7h8"></path>
-                        <path d="M8 11h8"></path>
-                        <path d="M8 15h5"></path>
-                    </svg>
+                    <img src={appLogo} alt="AppNotas" class="app-icon-logo" style="width: 28px; height: 28px; display: block;" />
                     <span style="font-size: 8px; color: #555; position: absolute; bottom: -8px;">v2</span>
                 </div>
             </button>
