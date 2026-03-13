@@ -12,12 +12,14 @@
     import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 
     import { geminiService } from '$lib/services/geminiService';
-    import appIcon from '$lib/assets/nobg-icon.png';
+    import WindowControls from '$lib/components/WindowControls.svelte';
+    import appLogo from '$lib/assets/nobg-icon.png';
 
     let loading = $state(true);
     let newTaskText = $state('');
     let showFileSelector = $state(false);
     let showCommandPalette = $state(false);
+    let logoLoaded = $state(false);
     let commandPaletteRef = $state<any>();
 
     // AI Flow State
@@ -358,10 +360,19 @@
     <!-- Drag Handle Area -->
     <div class="drag-handle" data-tauri-drag-region></div>
 
-    <header class="window-header">
+    <header class="window-header" data-tauri-drag-region>
         <div class="header-left">
             <button class="branding" onclick={returnToApp} title="Return to App">
-                <img src={appIcon} alt="AppNotas" class="app-icon-img" />
+                <div class="app-icon-container">
+                    <svg class="app-icon-logo" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: block;">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                        <path d="M8 7h8"></path>
+                        <path d="M8 11h8"></path>
+                        <path d="M8 15h5"></path>
+                    </svg>
+                    <span style="font-size: 8px; color: #555; position: absolute; bottom: -8px;">v2</span>
+                </div>
             </button>
         </div>
 
@@ -375,16 +386,12 @@
                     {/if}
                 </span>
                 <div class="pill-icon">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display: block;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
                 </div>
             </button>
         </div>
 
-        <div class="window-controls">
-            <button class="control-btn close" onclick={hideWindow} title="Close">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-        </div>
+        <WindowControls showAll={false} onClose={hideWindow} />
     </header>
 
     {#if showFileSelector}
@@ -673,34 +680,38 @@
         border: none;
         padding: 0;
         cursor: pointer;
+        min-width: 40px;
+        min-height: 48px;
     }
 
-    .app-icon-img {
-        width: 36px;
-        height: 36px;
-        object-fit: contain;
+    .app-icon-logo {
+        color: var(--primary);
         transition: transform 0.2s;
     }
 
-    .branding:hover .app-icon-img {
+    .branding:hover .app-icon-logo {
         transform: scale(1.1);
     }
 
-    .header-left {
+    .header-left, .header-center {
         display: flex;
+        align-items: center;
+    }
+
+    .header-left {
         justify-content: flex-start;
     }
 
     .header-center {
-        display: flex;
         justify-content: center;
     }
 
     .window-header {
         display: grid;
         grid-template-columns: 1fr auto 1fr;
-        align-items: center;
-        padding: 8px 16px;
+        align-items: stretch;
+        padding: 0 0 0 16px;
+        height: 48px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
 
@@ -736,7 +747,7 @@
     .pill-icon {
         display: flex;
         align-items: center;
-        opacity: 0.6;
+        opacity: 0.9;
         margin-top: 1px;
     }
 
@@ -745,34 +756,6 @@
         color: var(--primary);
     }
 
-    .window-controls {
-        display: flex;
-        justify-content: flex-end;
-        gap: 4px;
-    }
-
-    .control-btn {
-        background: transparent;
-        border: none;
-        color: var(--text-dim);
-        padding: 4px;
-        border-radius: 4px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s;
-    }
-
-    .control-btn:hover {
-        background: rgba(255, 255, 255, 0.08);
-        color: var(--text-main);
-    }
-
-    .control-btn.close:hover {
-        background: rgba(248, 81, 73, 0.2);
-        color: #f85149;
-    }
 
     .drag-handle {
         height: 6px;

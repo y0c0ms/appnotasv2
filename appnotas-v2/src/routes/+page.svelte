@@ -35,6 +35,7 @@
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import Terminal from '$lib/components/Terminal.svelte';
 	import RefreshDiffModal from '$lib/components/RefreshDiffModal.svelte';
+	import WindowControls from '$lib/components/WindowControls.svelte';
 	import { detectLanguage } from '$lib/utils/files';
 
 	let loading = $state(true);
@@ -443,9 +444,9 @@
 
 	<div class="main-grid" class:show-settings={$settingsOpen}>
 		<div class="editor-section">
-			<header>
+			<header data-tauri-drag-region>
 				<div class="header-branding">
-					<img src="/src/lib/assets/nobg-icon.png" alt="AppNotas" class="header-logo" />
+					<img src="/app-logo.png" alt="AppNotas" class="header-logo" />
 				</div>
 				<div class="header-actions">
 					{#if $aiState.pendingProposals > 0}
@@ -488,6 +489,7 @@
 							📝 New Note
 						{/if}
 					</button>
+					<WindowControls />
 				</div>
 			</header>
 
@@ -677,9 +679,11 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 1rem 1.5rem;
+		padding: 0 0 0 1.5rem; /* Remove right padding for window controls */
+		height: 48px; /* Fixed height for title bar feel */
 		border-bottom: 1px solid #2a2a2a;
 		background: #1a1a1a;
+		user-select: none; /* Prevent highlighting while dragging */
 	}
 
 	.header-branding {

@@ -31,11 +31,7 @@ pub fn run() {
                         let config = app.state::<AppShortcutConfig>();
 
                         if *shortcut == *config.main.lock().unwrap() {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _: Result<(), _> = window.unminimize();
-                                let _: Result<(), _> = window.show();
-                                let _: Result<(), _> = window.set_focus();
-                            }
+                            show_main_window(app);
                         } else if *shortcut == *config.overlay.lock().unwrap() {
                             toggle_todo_window(app);
                         }
@@ -51,16 +47,16 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&open_i, &todo_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(app.default_window_icon().cloned().unwrap_or_else(|| {
+                    // Fallback or just skip icon if not found to prevent panic
+                    println!("Warning: Default window icon not found, tray icon might be empty.");
+                    app.default_window_icon().cloned().expect("Still failed to get icon") // Should probably have a better fallback
+                }))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _: Result<(), _> = window.unminimize();
-                            let _: Result<(), _> = window.show();
-                            let _: Result<(), _> = window.set_focus();
-                        }
+                        show_main_window(app);
                     }
                     "todo" => {
                         toggle_todo_window(app);
@@ -76,27 +72,22 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        println!("Tray Icon Left Clicked");
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
 
-            // --- Global Shortcut Setup ---
             // Main App: Ctrl + Shift + Space
-            let main_shortcut =
-                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-            app.global_shortcut().register(main_shortcut)?;
+            let main_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+            if let Err(e) = app.global_shortcut().register(main_shortcut) {
+                eprintln!("Failed to register main shortcut: {}", e);
+            }
 
             // ToDo Overlay: Ctrl + Shift + L
-            let todo_shortcut =
-                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyL);
-            app.global_shortcut().register(todo_shortcut)?;
+            let todo_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyL);
+            if let Err(e) = app.global_shortcut().register(todo_shortcut) {
+                eprintln!("Failed to register todo shortcut: {}", e);
+            }
 
             // Store in state
             app.manage(AppShortcutConfig {
@@ -137,17 +128,26 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(todo) = app.get_webview_window("todo") {
+        let _ = todo.hide();
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+}
+
 fn toggle_todo_window(app: &tauri::AppHandle) {
     let main_window = app.get_webview_window("main");
     if let Some(window) = app.get_webview_window("todo") {
         if window.is_visible().unwrap_or(false) {
             let _: Result<(), _> = window.hide();
-            // Restore main if it was minimized? No, user wants overlay closed and main opened specifically via icon/event.
-            // But if we toggle OFF, maybe we stay in current state.
         } else {
-            // Minimize main when showing overlay
+            // Hide main when showing overlay
             if let Some(main) = main_window {
-                let _ = main.minimize();
+                let _ = main.hide();
             }
             let _: Result<(), _> = window.show();
             let _: Result<(), _> = window.set_focus();
@@ -157,9 +157,9 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
         let monitor = app.primary_monitor().ok().flatten();
         let (width, height) = (350.0, 500.0);
 
-        // Minimize main when creating overlay
+        // Hide main when creating overlay
         if let Some(main) = main_window {
-            let _: Result<(), _> = main.minimize();
+            let _ = main.hide();
         }
 
         let mut builder = WebviewWindowBuilder::new(
@@ -212,12 +212,8 @@ fn update_shortcuts(app: tauri::AppHandle, overlay: String, main: String) -> Res
     let _ = app.global_shortcut().unregister_all();
 
     // 2. Register new ones
-    app.global_shortcut()
-        .register(overlay_sc)
-        .map_err(|e| e.to_string())?;
-    app.global_shortcut()
-        .register(main_sc)
-        .map_err(|e| e.to_string())?;
+    let _ = app.global_shortcut().register(overlay_sc);
+    let _ = app.global_shortcut().register(main_sc);
 
     // 3. Update state
     let config = app.state::<AppShortcutConfig>();
