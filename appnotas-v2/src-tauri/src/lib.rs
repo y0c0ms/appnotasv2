@@ -185,9 +185,16 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
             // Position in bottom right for Windows and Linux
             if let Some(ref m) = monitor {
                 let screen_size = m.size();
+                let screen_pos = m.position();
                 let scale_factor = m.scale_factor();
-                let x = (screen_size.width as f64 / scale_factor) - width - 20.0;
-                let y = (screen_size.height as f64 / scale_factor) - height - 60.0; // Above taskbar
+                
+                let logical_width = screen_size.width as f64 / scale_factor;
+                let logical_height = screen_size.height as f64 / scale_factor;
+                let logical_x = screen_pos.x as f64 / scale_factor;
+                let logical_y = screen_pos.y as f64 / scale_factor;
+                
+                let x = logical_x + logical_width - width - 20.0;
+                let y = logical_y + logical_height - height - 60.0; // Above taskbar
                 println!("🖥️ Monitor found! Position: ({}, {})", x, y);
                 builder = builder.position(x, y);
             } else {
@@ -202,11 +209,17 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
             #[cfg(not(target_os = "macos"))]
             if let Some(ref m) = monitor {
                 let screen_size = m.size();
+                let screen_pos = m.position();
                 let scale_factor = m.scale_factor();
-                println!("🖥️ Screen size: {:?}, Scale: {}", screen_size, scale_factor);
+                println!("🖥️ Screen size: {:?}, Pos: {:?}, Scale: {}", screen_size, screen_pos, scale_factor);
                 
-                let x = (screen_size.width as f64 / scale_factor) - width - 20.0;
-                let y = (screen_size.height as f64 / scale_factor) - height - 60.0;
+                let logical_width = screen_size.width as f64 / scale_factor;
+                let logical_height = screen_size.height as f64 / scale_factor;
+                let logical_x = screen_pos.x as f64 / scale_factor;
+                let logical_y = screen_pos.y as f64 / scale_factor;
+                
+                let x = logical_x + logical_width - width - 20.0;
+                let y = logical_y + logical_height - height - 60.0;
                 
                 let window_clone = window.clone();
                 // Capture owned values to avoid lifetime issues in async block
@@ -214,6 +227,8 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
                 let height_val = height;
                 let screen_width = screen_size.width;
                 let screen_height = screen_size.height;
+                let screen_px = screen_pos.x;
+                let screen_py = screen_pos.y;
 
                 tauri::async_runtime::spawn(async move {
                     // Longer delay to ensure the window is fully managed by the compositor
@@ -222,8 +237,8 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
                     let _ = window_clone.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
                     
                     // Also try physical just in case logical is failing due to scale issues
-                    let px = (screen_width as f64) - (width_val * scale_factor) - (20.0 * scale_factor);
-                    let py = (screen_height as f64) - (height_val * scale_factor) - (60.0 * scale_factor);
+                    let px = (screen_px as f64) + (screen_width as f64) - (width_val * scale_factor) - (20.0 * scale_factor);
+                    let py = (screen_py as f64) + (screen_height as f64) - (height_val * scale_factor) - (60.0 * scale_factor);
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     println!("🚀 (Extra Delay) Moving to Physical({}, {})", px, py);
                     let _ = window_clone.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(px as i32, py as i32)));
