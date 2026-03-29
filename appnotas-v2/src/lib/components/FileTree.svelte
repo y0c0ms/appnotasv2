@@ -147,10 +147,10 @@
 				}
 				console.error('Failed to open file:', e);
 				
-				// Auto-clear error after 5 seconds
+				// Auto-clear error after 3 seconds
 				setTimeout(() => {
 					error = '';
-				}, 5000);
+				}, 3000);
 				
 				// Don't change activeFile - keep navigation working
 			}
@@ -202,6 +202,11 @@
 	});
 </script>
 
+<svelte:window 
+    onkeydown={() => { if (error) error = ''; }} 
+    onmousedown={() => { if (error) error = ''; }} 
+/>
+
 <div class="file-tree-wrapper">
 	<div class="current-path">
 		{$currentDirectory || 'No directory'}
@@ -245,9 +250,10 @@
 	>
 		{#if loading}
 			<div class="loading">Loading...</div>
-		{:else if error}
-			<div class="error">{error}</div>
 		{:else}
+			{#if error}
+				<div class="error-toast">{error}</div>
+			{/if}
 			<div class="entries">
 				{#each filteredEntries as entry, i}
 					<button
@@ -367,15 +373,28 @@
 		font-size: 0.8rem;
 	}
 
-	.loading,
-	.error {
+	.loading {
 		padding: 1rem;
 		text-align: center;
 		color: #888;
 	}
 
-	.error {
-		color: #ff5555;
+	.error-toast {
+		position: absolute;
+		bottom: 1rem;
+		left: 50%;
+		transform: translateX(-50%);
+		background: #ff5555;
+		color: #fff;
+		padding: 0.5rem 1rem;
+		border-radius: 4px;
+		font-size: 0.8rem;
+		box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+		z-index: 10;
+		text-align: center;
+		pointer-events: none;
+		max-width: 90%;
+		word-wrap: break-word;
 	}
 
 	.entries {

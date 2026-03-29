@@ -223,7 +223,7 @@ export async function createNoteFile(title: string, subfolder?: string) {
 /**
  * Save note content to file
  */
-export async function saveNoteToFile(id: string, content: string) {
+export async function saveNoteToFile(id: string, content: string, newTitle?: string) {
     try {
         const notes = get(notesList);
         const tasks = get(taskNotesList);
@@ -231,25 +231,23 @@ export async function saveNoteToFile(id: string, content: string) {
         
         if (!note || !note.path) throw new Error('Note or path not found');
 
+        const titleToSave = newTitle !== undefined ? newTitle : note.title;
+
         await invoke('save_note_to_file', {
             path: note.path,
             content,
-            title: note.title
+            title: titleToSave
         });
 
         // Update local state in both lists
-        notesList.update(notes =>
-            notes.map(n => n.id === id
-                ? { ...n, content, updated_at: new Date().toISOString() }
+        const updateFn = (nList: Note[]) => 
+            nList.map(n => n.id === id
+                ? { ...n, content, title: titleToSave, updated_at: new Date().toISOString() }
                 : n
-            )
-        );
-        taskNotesList.update(notes =>
-            notes.map(n => n.id === id
-                ? { ...n, content, updated_at: new Date().toISOString() }
-                : n
-            )
-        );
+            );
+
+        notesList.update(updateFn);
+        taskNotesList.update(updateFn);
 
         // Notify other windows
         await emit('notes-updated', { source: myWindowLabel });

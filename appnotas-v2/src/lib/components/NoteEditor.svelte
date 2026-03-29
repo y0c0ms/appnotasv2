@@ -150,20 +150,9 @@
 			const originalNote = allNotes.find(n => n.id === id);
 			if (!originalNote) return;
 
-			const updatedNote = {
-				...originalNote,
-				title: noteTitle,
-				content: content,
-				lastModified: new Date()
-			};
+			await saveNoteToFile(originalNote.id, content, noteTitle);
+			console.log('Saved note:', noteTitle);
 
-			await saveNoteToFile(updatedNote.id, updatedNote.content);
-			console.log('Saved note:', updatedNote.title);
-
-			notesList.update((notes) =>
-				notes.map((n) => (n.id === updatedNote.id ? updatedNote : n))
-			);
-			
 			// If we just saved the currently active note, clear dirty flag
 			if (id === currentNoteId) {
 				isDirty = false;

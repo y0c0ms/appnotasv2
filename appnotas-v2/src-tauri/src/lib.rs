@@ -206,7 +206,7 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
             println!("✅ Overlay window built successfully!");
 
             // Explicitly set position again after build for Linux/Wayland consistency
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "linux")]
             if let Some(ref m) = monitor {
                 let screen_size = m.size();
                 let screen_pos = m.position();
