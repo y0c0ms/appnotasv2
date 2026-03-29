@@ -37,6 +37,7 @@
 	import RefreshDiffModal from '$lib/components/RefreshDiffModal.svelte';
 	import WindowControls from '$lib/components/WindowControls.svelte';
 	import { detectLanguage } from '$lib/utils/files';
+	import { FolderTree, Notebook, ListTodo, RefreshCw, FilePlus2, ListPlus } from 'lucide-svelte';
 
 	let loading = $state(true);
 	let error = $state('');
@@ -202,6 +203,34 @@
 		}
 	}
 
+	// React to activeFile changes to lazy load if empty
+	$effect(() => {
+		if ($activeFile && $activeFile.modified === false && $activeFile.content === "") {
+			(async () => {
+				const f = { ...$activeFile };
+				try {
+					if (f.type === 'pdf') {
+						f.content = convertFileSrc(f.path);
+					} else {
+						f.content = await invoke<string>('read_file', { path: f.path });
+					}
+					openFiles.update(fs => fs.map(file => file.path === f.path ? f : file));
+                    // Update the active file reference directly to trigger re-renders
+					activeFile.set(f);
+				} catch (e) {
+					console.error("Failed to lazy load active file:", e);
+				}
+			})();
+		}
+	});
+
+	// Inject custom font variable continuously into the DOM root
+	$effect(() => {
+		if (typeof document !== 'undefined' && $settingsStore.editorFont) {
+			document.documentElement.style.setProperty('--app-font', $settingsStore.editorFont);
+		}
+	});
+
 	onMount(() => {
 		console.log('🚀 App mounted, setting up shortcuts...');
 		setupGlobalShortcuts();
@@ -212,18 +241,27 @@
             await initNotes(); // Start listening for sync events
             console.log('✅ Shortcuts initialized and settings loaded');
 
-		const dir = get(settingsStore).notesDirectory;
+            const settings = get(settingsStore);
+            const dir = settings.notesDirectory;
 
-		if (dir) {
-			console.log('📂 Loading saved notes directory:', dir);
-			try {
-				await setNotesDirectory(dir);
-			} catch (e) {
-				console.error('Failed to load saved notes directory:', e);
-			}
-		}
+            if (dir) {
+                console.log('📂 Loading saved notes directory:', dir);
+                try {
+                    await setNotesDirectory(dir);
+                } catch (e) {
+                    console.error('Failed to load saved notes directory:', e);
+                }
+            }
 
-		})();
+            // Restore last active state based on initial tab
+            if ($activeTab === 'tasks') {
+                if (settings.lastActiveTaskId) activeNoteId.set(settings.lastActiveTaskId);
+            } else if ($activeTab === 'notes') {
+                if (settings.lastActiveNoteId) activeNoteId.set(settings.lastActiveNoteId);
+            }
+
+            loading = false;
+        })();
 
         // Listen for restore-main event from overlay
         listen('restore-main', async (event: any) => {
@@ -260,15 +298,6 @@
 			}
 		};
 		window.addEventListener('notes-directory-changed', handleDirChange);
-
-		// Restore last active note if available
-		const lastNoteId = get(settingsStore).lastActiveNoteId;
-		if (lastNoteId) {
-			console.log('🔄 Restoring last active note:', lastNoteId);
-			activeNoteId.set(lastNoteId);
-		}
-
-		loading = false;
 
 		return () => {
 			window.removeEventListener('notes-directory-changed', handleDirChange);
@@ -462,7 +491,7 @@
 						title="Check for external changes"
 						disabled={!$activeNote || $activeTab !== 'notes'}
 					>
-						🔄
+						<RefreshCw size={16} />
 					</button>
 					<button 
 						class="btn-icon terminal-toggle" 
@@ -483,11 +512,13 @@
 						class:tasks-btn={$activeTab === 'tasks'}
 						onclick={() => createNewNote($activeTab === 'tasks' ? 'tasks' : undefined)}
 					>
-						{#if $activeTab === 'tasks'}
-							✅ New Task
-						{:else}
-							📝 New Note
-						{/if}
+						<div style="display: flex; align-items: center; gap: 0.4rem; justify-content: center;">
+							{#if $activeTab === 'tasks'}
+								<ListPlus size={16} /> New Task
+							{:else}
+								<FilePlus2 size={16} /> New Note
+							{/if}
+						</div>
 					</button>
 					<WindowControls />
 				</div>
@@ -562,7 +593,9 @@
 							{/key}
 						{:else}
 							<div class="empty-state">
-								<div class="empty-icon">📁</div>
+								<div class="empty-icon">
+									<FolderTree size={64} opacity={0.3} color="#fff" />
+								</div>
 								<h2>Select a file from the explorer</h2>
 								<p>Navigate the file tree to open documents</p>
 							</div>
@@ -575,7 +608,13 @@
 							{/key}
 						{:else}
 							<div class="empty-state">
-								<div class="empty-icon">{$activeTab === 'tasks' ? '✅' : '📓'}</div>
+								<div class="empty-icon">
+									{#if $activeTab === 'tasks'}
+										<ListTodo size={64} opacity={0.3} color="#fff" />
+									{:else}
+										<Notebook size={64} opacity={0.3} color="#fff" />
+									{/if}
+								</div>
 								<h2>{$activeTab === 'tasks' ? 'Select a task list to edit' : 'Select a note to start writing'}</h2>
 								<p>Or use <kbd>Ctrl+P</kbd> for commands</p>
 							</div>
@@ -632,6 +671,31 @@
 		height: 100%;
 		margin: 0;
 		padding: 0;
+		font-family: var(--app-font, 'Inter', -apple-system, sans-serif);
+	}
+
+	/* Custom Dark Scrollbars */
+	:global(::-webkit-scrollbar) {
+		width: 10px;
+		height: 10px;
+	}
+
+	:global(::-webkit-scrollbar-track) {
+		background: transparent;
+	}
+
+	:global(::-webkit-scrollbar-corner) {
+		background: transparent;
+	}
+
+	:global(::-webkit-scrollbar-thumb) {
+		background: rgba(255, 255, 255, 0.1);
+		border: 2px solid #09090b;
+		border-radius: 6px;
+	}
+
+	:global(::-webkit-scrollbar-thumb:hover) {
+		background: rgba(255, 255, 255, 0.2);
 	}
 
 	/* Refined focus reset */
@@ -647,8 +711,8 @@
 	.app {
 		display: flex;
 		height: 100vh;
-		background: #1a1a1a;
-		color: #fff;
+		background: #09090b;
+		color: #fafafa;
 		overflow: hidden;
 	}
 
@@ -657,7 +721,7 @@
 		display: grid;
 		grid-template-columns: 1fr;
 		height: 100vh;
-		background-color: #0d1117;
+		background-color: #09090b;
 		transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 		overflow: hidden;
 	}
@@ -943,7 +1007,6 @@
 		position: relative;
 		width: 100%;
 		flex-shrink: 0;
-		border-top: 1px solid #30363d;
 		background: #0d1117;
 	}
 

@@ -7,6 +7,7 @@
     import { fade, slide } from 'svelte/transition';
     import { geminiService } from '../services/geminiService';
     import { onMount } from 'svelte';
+    import { X, FolderOpen, Upload, Download } from 'lucide-svelte';
 
     // Shortcut names for display
     const shortcutNames: Record<string, string> = {
@@ -232,7 +233,7 @@
 >
     <div class="settings-header">
         <h2>Settings</h2>
-        <button class="close-btn" on:click={close}>✕</button>
+        <button class="close-btn" on:click={close}><X size={18} /></button>
     </div>
 
     <div class="settings-content">
@@ -258,6 +259,21 @@
                 </label>
             </div>
             <p class="hint">Toggle Bubble and Floating menus (also via Ctrl+K)</p>
+            <div class="setting-item column" style="margin-top: 1rem;">
+                <label for="font-pref">Editor Font</label>
+                <select 
+                    id="font-pref"
+                    bind:value={$settingsStore.editorFont} 
+                    on:change={save}
+                    class="text-input select-input"
+                >
+                    <option value="Inter">Inter (Sans Serif)</option>
+                    <option value="Roboto">Roboto (Sans Serif)</option>
+                    <option value="Space Grotesk">Space Grotesk (Modern)</option>
+                    <option value="'Fira Code', monospace">Fira Code (Monospace)</option>
+                    <option value="system-ui">System Default</option>
+                </select>
+            </div>
         </section>
 
         <section>
@@ -287,7 +303,9 @@
                     <span class="dir-path" title={$settingsStore.notesDirectory}>
                         {$settingsStore.notesDirectory || 'No directory selected'}
                     </span>
-                    <button class="btn-picker" on:click={selectDirectory}>📁 Browse</button>
+                    <button class="btn-picker" on:click={selectDirectory}>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center;"><FolderOpen size={16} /> Browse</div>
+                    </button>
                 </div>
             </div>
             <p class="hint">Where your .md notes and files are stored</p>
@@ -380,8 +398,12 @@
             <h3>Data Management</h3>
             <p class="hint">Export or import your settings (shortcuts, AI keys, etc.)</p>
             <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                <button class="btn-picker" style="flex: 1;" on:click={exportSettings}>📤 Export Settings</button>
-                <button class="btn-picker" style="flex: 1;" on:click={importSettings}>📥 Import Settings</button>
+                <button class="btn-picker" style="flex: 1;" on:click={exportSettings}>
+                    <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center;"><Upload size={16} /> Export Settings</div>
+                </button>
+                <button class="btn-picker" style="flex: 1;" on:click={importSettings}>
+                    <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center;"><Download size={16} /> Import Settings</div>
+                </button>
             </div>
         </section>
     </div>

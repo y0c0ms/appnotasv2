@@ -3,6 +3,7 @@
 	import NotesList from './NotesList.svelte';
 	import FileTree from './FileTree.svelte';
 	import TaskList from './TaskList.svelte';
+	import { Notebook, Folder, ListTodo } from 'lucide-svelte';
 </script>
 
 <div class="sidebar">
@@ -12,21 +13,21 @@
 			class:active={$activeTab === 'notes'} 
 			on:click={() => ($activeTab = 'notes')}
 		>
-			📝 Notes
+			<Notebook size={16} /> Notes
 		</button>
 		<button 
 			class="tab" 
 			class:active={$activeTab === 'files'} 
 			on:click={() => ($activeTab = 'files')}
 		>
-			📁 Files
+			<Folder size={16} /> Files
 		</button>
 		<button 
 			class="tab" 
 			class:active={$activeTab === 'tasks'} 
 			on:click={() => ($activeTab = 'tasks')}
 		>
-			✅ Tasks
+			<ListTodo size={16} /> Tasks
 		</button>
 	</div>
 
@@ -45,8 +46,8 @@
 	.sidebar {
 		width: 250px;
 		height: 100vh;
-		background: #1a1a1a;
-		border-right: 1px solid #2a2a2a;
+		background: #09090b;
+		border-right: 1px solid rgba(255, 255, 255, 0.05);
 		display: flex; /* Restored */
 		flex-direction: column; /* Restored */
 		flex-shrink: 0;
@@ -56,7 +57,7 @@
 
 	.tabs {
 		display: flex;
-		border-bottom: 1px solid #2a2a2a;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 	}
 
 	.tab {
@@ -67,16 +68,21 @@
 		color: #888;
 		cursor: pointer;
 		transition: all 0.15s;
-		font-size: 0.875rem;
+		font-size: 0.75rem;
+        font-weight: 500;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
 	}
 
 	.tab:hover {
-		background: #2a2a2a;
+		background: rgba(255, 255, 255, 0.02);
 		color: #ccc;
 	}
 
 	.tab.active {
-		background: #2a2a2a;
+		background: rgba(255, 255, 255, 0.04);
 		color: #4a9eff;
 	}
 

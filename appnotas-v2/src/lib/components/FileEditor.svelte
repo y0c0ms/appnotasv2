@@ -255,15 +255,16 @@
 		height: 100%;
 		display: flex;
 		flex-direction: column;
-		background: #0d1117;
+		background: #09090b;
 		transition: border 0.15s ease;
 		overflow: hidden;
 		border: 2px solid transparent;
 		box-sizing: border-box;
+		border-radius: 6px;
 	}
 
 	.file-editor.focused {
-		border: 2px solid #4a9eff;
+		border: 2px solid rgba(74, 158, 255, 0.4);
 	}
 
 	.editor-container {

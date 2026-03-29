@@ -13,12 +13,14 @@ export interface AppSettings {
     geminiKey: string;
     notesDirectory: string;
     lastActiveNoteId: string;
+    lastActiveTaskId: string;
     aiModelPreference: string;
     zoomLevel: number;
     pinnedNoteIds: string[];
     autostart: boolean;
     defaultShell: string;
     selectedTaskFileId: string;
+    editorFont: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -48,16 +50,20 @@ const DEFAULT_SETTINGS: AppSettings = {
     geminiKey: '',
     notesDirectory: '',
     lastActiveNoteId: '',
+    lastActiveTaskId: '',
     aiModelPreference: 'gemini-2.0-flash',
     zoomLevel: 1.0,
     pinnedNoteIds: [],
     autostart: false,
     defaultShell: 'powershell',
-    selectedTaskFileId: ''
+    selectedTaskFileId: '',
+    editorFont: 'Inter'
 };
 
 let settingsPath = ''; 
 let settingsInitialized = false;
+let lastSyncedOverlay = '';
+let lastSyncedMain = 'Ctrl+Shift+Space';
 
 function createSettingsStore() {
     const { subscribe, set, update } = writable<AppSettings>(DEFAULT_SETTINGS);
@@ -85,11 +91,15 @@ function createSettingsStore() {
                         });
                         console.log('✅ Settings loaded from disk');
                         
-                        // Sync loaded shortcuts to Rust
+                        // Sync loaded shortcuts to Rust immediately on startup
                         if (loaded.keybinds?.toggleOverlay) {
+                            const overlay = loaded.keybinds.toggleOverlay;
+                            const main = 'Ctrl+Shift+Space';
+                            lastSyncedOverlay = overlay;
+                            lastSyncedMain = main;
                             await invoke('update_shortcuts', { 
-                                overlay: loaded.keybinds.toggleOverlay, 
-                                main: 'Ctrl+Shift+Space' 
+                                overlay, 
+                                main 
                             }).catch(err => console.error('Failed to sync shortcuts on startup:', err));
                         }
 
@@ -123,11 +133,17 @@ function createSettingsStore() {
                     content: JSON.stringify(current, null, 2)
                 });
                 
-                // Sync shortcuts to Rust if they exist
-                if (current.keybinds.toggleOverlay && current.keybinds.openPalette) {
+                // Sync shortcuts to Rust only if they changed
+                const newOverlay = current.keybinds.toggleOverlay;
+                const newMain = 'Ctrl+Shift+Space'; 
+                
+                if (newOverlay && (newOverlay !== lastSyncedOverlay || newMain !== lastSyncedMain)) {
                     await invoke('update_shortcuts', { 
-                        overlay: current.keybinds.toggleOverlay, 
-                        main: 'Ctrl+Shift+Space' // Hardcoded main for now or add to settings UI
+                        overlay: newOverlay, 
+                        main: newMain
+                    }).then(() => {
+                        lastSyncedOverlay = newOverlay;
+                        lastSyncedMain = newMain;
                     }).catch(err => console.error('Failed to sync shortcuts to Rust:', err));
                 }
             } catch (err) {

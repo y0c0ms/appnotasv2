@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { settingsStore } from './settings';
+import { activeTab } from './shortcuts';
 
 let myWindowLabel = '';
 if (typeof window !== 'undefined') {
@@ -35,15 +36,56 @@ export const taskNotesList = writable<Note[]>([]);
 // Currently active note ID
 export const activeNoteId = writable<string | null>(null);
 
+// Tab-specific last viewed stores
+export const lastNoteId = writable<string | null>(null);
+export const lastTaskId = writable<string | null>(null);
+
 // Search Queries
 export const searchQuery = writable<string>('');
 export const taskSearchQuery = writable<string>('');
 
+// Active Note Content (fetched dynamically for non-task notes)
+export const activeNoteContent = writable<string>('');
+
 // Sync activeNoteId and selectedTaskFileId to settings for persistence
-activeNoteId.subscribe((id: string | null) => {
+activeNoteId.subscribe(async (id: string | null) => {
     if (id) {
-        settingsStore.update(s => ({ ...s, lastActiveNoteId: id }));
-        settingsStore.save();
+        const tab = get(activeTab);
+        if (tab === 'notes') {
+            lastNoteId.set(id);
+            settingsStore.update(s => ({ ...s, lastActiveNoteId: id }));
+        } else if (tab === 'tasks') {
+            lastTaskId.set(id);
+            settingsStore.update(s => ({ ...s, lastActiveTaskId: id }));
+        }
+        
+        const notes = get(notesList);
+        const tasks = get(taskNotesList);
+        const note = notes.find(n => n.id === id) || tasks.find(n => n.id === id);
+        
+        if (note && note.path) {
+             if (note.content && note.content.length > 0) {
+                 activeNoteContent.set(note.content);
+             } else {
+                 try {
+                     const rawFileContent = await invoke<string>('read_file', { path: note.path });
+                     // Strip frontmatter since TipTap expects body text
+                     let body = rawFileContent;
+                     if (rawFileContent.startsWith('---')) {
+                         const parts = rawFileContent.split('---');
+                         if (parts.length >= 3) {
+                             body = parts.slice(2).join('---').trimStart();
+                         }
+                     }
+                     activeNoteContent.set(body);
+                 } catch(e) {
+                     console.error('Failed to lazy load note content:', e);
+                     activeNoteContent.set('');
+                 }
+             }
+        }
+    } else {
+        activeNoteContent.set('');
     }
 });
 
@@ -81,6 +123,17 @@ export async function initNotes() {
         if (settings.selectedTaskFileId) {
             selectedTaskFileId.set(settings.selectedTaskFileId);
         }
+
+        // Restore last active IDs
+        lastNoteId.set(settings.lastActiveNoteId || null);
+        lastTaskId.set(settings.lastActiveTaskId || null);
+        
+        // Set initial active note based on current tab
+        const tab = get(activeTab);
+        if (tab === 'notes') activeNoteId.set(settings.lastActiveNoteId || null);
+        else if (tab === 'tasks') activeNoteId.set(settings.lastActiveTaskId || null);
+
+        console.log('📡 Notes system initialized');
     } catch (error) {
         console.error('Failed to init notes:', error);
     }
@@ -92,13 +145,11 @@ export async function initNotes() {
 
         console.log('🔄 Sync event received from:', payload?.source || 'unknown');
         
-        // Refresh settings from disk first to get updated directory/selection
         await settingsStore.init();
         const settings = get(settingsStore);
         
         if (settings.notesDirectory) {
             notesDirectory.set(settings.notesDirectory);
-            console.log('🔄 Refreshing notes in current window for dir:', settings.notesDirectory);
             await loadNotes(settings.notesDirectory);
             await loadTaskNotes(settings.notesDirectory);
         }
@@ -110,6 +161,15 @@ export async function initNotes() {
 
     console.log('📡 Notes sync listener active');
 }
+
+// React to tab changes to swap active notes
+activeTab.subscribe(tab => {
+    if (tab === 'notes') {
+        activeNoteId.set(get(lastNoteId));
+    } else if (tab === 'tasks') {
+        activeNoteId.set(get(lastTaskId));
+    }
+});
 
 /**
  * Set notes directory and load notes from it
@@ -139,7 +199,7 @@ export async function loadTaskNotes(rootDirectory: string) {
         // Use a more robust path join if possible, but simple slash is usually ok with Path::new in Rust
         const tasksPath = rootDirectory.replace(/[\\/]$/, '') + (rootDirectory.includes('\\') ? '\\tasks' : '/tasks');
         
-        const notes = await invoke<Note[]>('list_notes_files', { directory: tasksPath }).catch(async (err) => {
+        const notes = await invoke<Note[]>('list_notes_files', { directory: tasksPath, includeContent: true }).catch(async (err) => {
             console.warn('Tasks folder not accessible:', err);
             return [];
         });
@@ -163,7 +223,7 @@ export async function loadNotes(directory?: string) {
             dir = settings.notesDirectory;
         }
 
-        const notes = await invoke<Note[]>('list_notes_files', { directory: dir });
+        const notes = await invoke<Note[]>('list_notes_files', { directory: dir, includeContent: false });
 
         // Re-apply pinned state from settings
         const settings = get(settingsStore);
@@ -242,12 +302,18 @@ export async function saveNoteToFile(id: string, content: string, newTitle?: str
         // Update local state in both lists
         const updateFn = (nList: Note[]) => 
             nList.map(n => n.id === id
-                ? { ...n, content, title: titleToSave, updated_at: new Date().toISOString() }
+                // We keep content in the store only if it already had content (e.g. tasks)
+                ? { ...n, content: n.content ? content : '', title: titleToSave, updated_at: new Date().toISOString() }
                 : n
             );
 
         notesList.update(updateFn);
         taskNotesList.update(updateFn);
+        
+        // Also update the active session content if we are editing it
+        if (get(activeNoteId) === id) {
+             activeNoteContent.set(content);
+        }
 
         // Notify other windows
         await emit('notes-updated', { source: myWindowLabel });

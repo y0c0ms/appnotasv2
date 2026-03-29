@@ -255,10 +255,10 @@ fn toggle_todo_window(app: &tauri::AppHandle) {
 
 #[tauri::command]
 fn update_shortcuts(app: tauri::AppHandle, overlay: String, main: String) -> Result<(), String> {
-    println!(
-        "⌨️ Updating global shortcuts: Overlay={}, Main={}",
-        overlay, main
-    );
+    // println!(
+    //     "⌨️ Updating global shortcuts: Overlay={}, Main={}",
+    //     overlay, main
+    // );
 
     let overlay_sc = parse_shortcut_str(&overlay).ok_or("Invalid overlay shortcut format")?;
     let main_sc = parse_shortcut_str(&main).ok_or("Invalid main shortcut format")?;

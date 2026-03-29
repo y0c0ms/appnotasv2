@@ -4,6 +4,7 @@
     import { activeTab } from '$lib/stores/shortcuts';
     import { tick } from 'svelte';
     import { deleteNoteFile } from '$lib/stores/notes';
+    import { Search, Pin, Trash2 } from 'lucide-svelte';
 
     let selectedIndex = $state(0);
     let listContainer = $state<HTMLElement>();
@@ -104,10 +105,13 @@
 
 <div class="tasks-sidebar-container">
     <div class="search-box">
+        <div class="search-icon-wrapper">
+            <Search size={14} color="#888" />
+        </div>
         <input 
             type="text" 
             class:focused={$focusArea === 'note-search'}
-            placeholder="🔍 Search tasks..." 
+            placeholder="Search tasks..." 
             bind:value={$taskSearchQuery}
             bind:this={searchInput}
             onfocus={() => focusArea.set('note-search')}
@@ -159,7 +163,7 @@
                             <div class="item-title-row">
                                 <div class="item-title">{note.title || 'Untitled'}</div>
                                 {#if note.id === $selectedTaskFileId}
-                                    <span class="overlay-indicator" title="Pinned to Overlay">📌</span>
+                                    <span class="overlay-indicator" title="Pinned to Overlay"><Pin size={12} /></span>
                                 {/if}
                             </div>
                             <div class="item-meta">
@@ -175,14 +179,14 @@
                             onclick={(e) => toggleOverlayPin(e, note.id)}
                             title={$selectedTaskFileId === note.id ? "Unpin from Overlay" : "Pin to Overlay"}
                         >
-                            📌
+                            <Pin size={14} />
                         </button>
                         <button 
                             class="action-btn delete-btn" 
                             onclick={(e) => handleDelete(e, note)}
                             title="Delete Task List"
                         >
-                            🗑️
+                            <Trash2 size={14} />
                         </button>
                     </div>
                 </div>
@@ -196,21 +200,33 @@
         display: flex;
         flex-direction: column;
         height: 100%;
-        background: #1a1a1a;
+        background: #09090b;
         gap: 2px;
     }
 
     .search-box {
         padding: 0.5rem;
-        background: #1a1a1a;
+        background: #09090b;
         box-sizing: border-box;
+        position: relative;
+    }
+
+    .search-icon-wrapper {
+        position: absolute;
+        left: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
     }
 
     .search-box input {
         width: 100%;
-        padding: 0.4rem 0.6rem;
-        background: #2a2a2a;
-        border: 1px solid #3a3a3a;
+        padding: 0.4rem 0.6rem 0.4rem 2rem;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
         border-radius: 4px;
         color: #fff;
         font-size: 0.8rem;
@@ -259,16 +275,16 @@
     }
 
     .task-item:hover {
-        background: #2a2a2a;
+        background: rgba(255, 255, 255, 0.02);
     }
 
     .task-item.active {
-        background: #2a2a2a;
+        background: rgba(255, 255, 255, 0.04);
         border-left-color: #a04dff;
     }
 
     .task-item.selected {
-        background: #2a2a2a;
+        background: rgba(255, 255, 255, 0.03);
     }
     
     .task-item.pinned {

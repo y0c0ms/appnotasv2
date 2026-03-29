@@ -169,10 +169,19 @@ export function setupGlobalShortcuts() {
                 const files = get(openFiles);
                 if (tab !== 'files' || files.length === 0) {
                     next = prevFocusArea(next);
-                    if (next === 'search' as any) {
-                        next = tab === 'files' ? 'file-search' : 'note-search';
-                    }
                 }
+            }
+
+            // Skip terminal and terminal-tabs if terminal is hidden
+            if (next === 'terminal' || next === 'terminal-tabs') {
+                if (!get(terminalVisible)) {
+                    next = prevFocusArea(next);
+                }
+            }
+
+            // Final search check in case skipping landed us on 'search'
+            if (next === 'search' as any) {
+                next = tab === 'files' ? 'file-search' : 'note-search';
             }
 
             console.log('[Shortcuts] Focus changing to:', next);
@@ -205,10 +214,19 @@ export function setupGlobalShortcuts() {
                 const files = get(openFiles);
                 if (tab !== 'files' || files.length === 0) {
                     next = nextFocusArea(next);
-                    if (next === 'search' as any) {
-                        next = tab === 'files' ? 'file-search' : 'note-search';
-                    }
                 }
+            }
+
+            // Skip terminal and terminal-tabs if terminal is hidden
+            if (next === 'terminal' || next === 'terminal-tabs') {
+                if (!get(terminalVisible)) {
+                    next = nextFocusArea(next);
+                }
+            }
+
+            // Final search check in case skipping landed us on 'search'
+            if (next === 'search' as any) {
+                next = tab === 'files' ? 'file-search' : 'note-search';
             }
 
             console.log('[Shortcuts] Focus changing to:', next);

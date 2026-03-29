@@ -103,7 +103,7 @@ fn generate_filename(title: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
+pub async fn list_notes_files(directory: String, include_content: bool) -> Result<Vec<Note>, String> {
     let path = Path::new(&directory);
     if !path.exists() {
         return Err(format!("Directory does not exist: {}", directory));
@@ -140,7 +140,7 @@ pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
                 Note {
                     id: filename.clone(),
                     title: frontmatter.title,
-                    content: body,
+                    content: if include_content { body } else { String::new() },
                     path: Some(file_path.to_str().unwrap().to_string()),
                     created_at: frontmatter.created,
                     updated_at: frontmatter.modified,
@@ -153,7 +153,7 @@ pub async fn list_notes_files(directory: String) -> Result<Vec<Note>, String> {
                 Note {
                     id: filename.clone(),
                     title,
-                    content: content.clone(),
+                    content: if include_content { content.clone() } else { String::new() },
                     path: Some(file_path.to_str().unwrap().to_string()),
                     created_at: now.clone(),
                     updated_at: now,

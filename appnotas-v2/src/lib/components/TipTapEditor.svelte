@@ -488,7 +488,7 @@
                     // Debug: Log HTML to see structure
                     // console.log('[TipTap HTML Debug]', editor.getHTML());
 					onUpdate(output);
-				}, 50); 
+				}, 250); 
 			},
             onCreate: ({ editor: e }) => {
                 currentEditor.set(e);
@@ -638,14 +638,14 @@
     {/if}
 	
 	{#if editor}
-		<div class="editor-stats">
-			{editor.storage.characterCount.characters()} chars
+		<div class="editor-stats-container">
+			<!-- Removed floating pill to fix blue ghost square bug -->
 		</div>
-	{/if}
-</div>
 
-<div bind:this={bubbleMenuElement} style="display: none"></div>
-<div bind:this={floatingMenuElement} style="display: none"></div>
+		<div bind:this={bubbleMenuElement} style="display: none"></div>
+		<div bind:this={floatingMenuElement} style="display: none"></div>
+	{/if}
+	</div>
 
 <style>
 	.tiptap-wrapper {
@@ -662,15 +662,10 @@
 	}
 
 
-	.editor-stats {
+	.editor-stats-container {
 		position: absolute;
 		bottom: 1rem;
 		right: 1.5rem;
-		font-size: 0.75rem;
-		color: #666;
 		pointer-events: none;
-		background: rgba(13, 17, 23, 0.8);
-		padding: 2px 8px;
-		border-radius: 10px;
 	}
 </style>

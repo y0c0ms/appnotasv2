@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { activeNote, notesList, taskNotesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
+	import { activeNote, activeNoteContent, notesList, taskNotesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
 	import {
 		colorChangeRequested,
 		codeInsertRequested,
@@ -109,16 +109,16 @@
 
                 // Now switch context
                 currentNoteId = $activeNote.id;
-                localContent = $activeNote.content;
+                localContent = $activeNoteContent;
                 localTitle = $activeNote.title;
                 // Sync the bound title too
                 title = $activeNote.title;
                 isDirty = false;
-            } else if ($activeNote.content !== localContent && !isDirty) {
+            } else if ($activeNoteContent !== localContent && !isDirty) {
                 // If the same note was updated externally (e.g. by Overlay) 
                 // and we don't have local unsaved changes, accept the new content.
                 console.log('🔄 Accepting external content update for:', $activeNote.title);
-                localContent = $activeNote.content;
+                localContent = $activeNoteContent;
                 localTitle = $activeNote.title;
                 title = $activeNote.title;
             }
@@ -366,7 +366,7 @@
 	}
 
 	.note-editor.focused {
-		box-shadow: inset 0 0 0 3px #4a9eff, 0 0 15px rgba(74, 158, 255, 0.4);
+		box-shadow: inset 0 0 0 2px rgba(74, 158, 255, 0.4);
 	}
 
 	.note-title {

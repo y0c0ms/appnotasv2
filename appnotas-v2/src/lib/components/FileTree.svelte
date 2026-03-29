@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { openFiles, currentDirectory, activeFile } from '$lib/stores/files';
+	import { openFiles, currentDirectory, activeFile, terminalCommandBus, terminalVisible } from '$lib/stores/files';
 	import { focusArea } from '$lib/stores/focus';
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { detectLanguage } from '$lib/utils/files';
 	import { tick, onMount } from 'svelte';
     import { homeDir } from '@tauri-apps/api/path';
+	import { Folder, FileText, Search } from 'lucide-svelte';
 
 	interface FileEntry {
 		name: string;
@@ -212,12 +213,14 @@
 		{$currentDirectory || 'No directory'}
 	</div>
 
-	<div class="search-container">
+	<div class="search-box">
+		<div class="search-icon-wrapper">
+			<Search size={14} color="#888" />
+		</div>
 		<input
 			type="text"
-			class="search-input"
 			class:focused={$focusArea === 'file-search'}
-			placeholder="🔍 Filter files..."
+			placeholder="Filter files..."
 			bind:value={searchQuery}
 			bind:this={searchInput}
 			onfocus={() => focusArea.set('file-search')}
@@ -263,7 +266,24 @@
 						onclick={() => handleClick(entry, i)}
 						onmouseenter={() => (selectedIndex = i)}
 					>
-						<span class="icon">{entry.is_dir ? '📁' : '📄'}</span>
+						{#if entry.is_dir}
+							<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<span class="icon folder-icon-action" title="Open in Terminal" onclick={(e) => {
+								e.stopPropagation();
+								if ($terminalVisible) {
+									$terminalCommandBus = `cd "${entry.path}"\r`;
+								} else {
+									openEntry(entry);
+								}
+							}}>
+								<Folder size={14} color="#888" />
+							</span>
+						{:else}
+							<span class="icon">
+								<FileText size={14} color="#666" />
+							</span>
+						{/if}
 						<span class="name">{entry.name}</span>
 						{#if !entry.is_dir && entry.size}
 							<span class="size">{formatSize(entry.size)}</span>
@@ -283,7 +303,7 @@
 		height: 100%;
 		display: flex;
 		flex-direction: column;
-		background: #1a1a1a;
+		background: #09090b;
 		gap: 2px;
 	}
 
@@ -291,23 +311,56 @@
 		padding: 0.5rem;
 		font-size: 0.75rem;
 		color: #888;
-		background: #1a1a1a;
+		background: #09090b;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		border-bottom: 1px solid #2a2a2a;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 	}
 
 	/* Search Container */
-	.search-container {
+	.search-box {
 		padding: 0.5rem;
-		position: relative;
-		background: #1a1a1a;
+		background: #09090b;
 		border: 2px solid transparent;
 		transition: border-color 0.15s ease;
 		box-sizing: border-box;
+		position: relative;
 	}
 
+	.search-icon-wrapper {
+		position: absolute;
+		left: 1rem;
+		top: 50%;
+		transform: translateY(-50%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+	}
+
+	.search-box input {
+		width: 100%;
+		padding: 0.4rem 2.2rem 0.4rem 2rem;
+		background: rgba(255, 255, 255, 0.03);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		border-radius: 6px;
+		color: #fff;
+		font-size: 0.8rem;
+		outline: none;
+		transition: border-color 0.15s ease, box-shadow 0.15s ease;
+		box-sizing: border-box;
+	}
+
+	.search-box input::placeholder {
+		color: #666;
+	}
+
+	.search-box input:focus,
+	.search-box input.focused {
+		border-color: #4a9eff;
+		box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3);
+	}
 
 	.file-list {
 		flex: 1;
@@ -315,7 +368,7 @@
 		flex-direction: column;
 		overflow-y: auto;
 		outline: none;
-		background: #1a1a1a;
+		background: #09090b;
 		border: 2px solid transparent;
 		transition: border-color 0.15s ease;
 		box-sizing: border-box;
@@ -325,32 +378,9 @@
 		border-color: #4a9eff;
 	}
 
-	.search-input {
-		width: 100%;
-		padding: 0.5rem 2rem 0.5rem 0.5rem;
-		background: #2a2a2a;
-		border: 1px solid #3a3a3a;
-		border-radius: 4px;
-		color: #e0e0e0;
-		font-size: 0.8rem;
-		outline: none;
-		transition: border-color 0.15s ease, box-shadow 0.15s ease;
-		box-sizing: border-box;
-	}
-
-	.search-input::placeholder {
-		color: #666;
-	}
-
-	.search-input:focus,
-	.search-input.focused {
-		border-color: #4a9eff;
-		box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3);
-	}
-
 	.clear-search {
 		position: absolute;
-		right: 0.75rem;
+		right: 1.25rem;
 		top: 50%;
 		transform: translateY(-50%);
 		background: transparent;
@@ -436,6 +466,21 @@
 	.icon {
 		font-size: 1rem;
 		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.folder-icon-action {
+		padding: 2px;
+		border-radius: 6px;
+		transition: all 0.15s ease;
+		background: transparent;
+	}
+
+	.folder-icon-action:hover {
+		background: rgba(255, 255, 255, 0.15);
+		cursor: pointer;
 	}
 
 	.name {
