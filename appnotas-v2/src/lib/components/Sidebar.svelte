@@ -4,42 +4,45 @@
 	import FileTree from './FileTree.svelte';
 	import TaskList from './TaskList.svelte';
 	import { Notebook, Folder, ListTodo } from 'lucide-svelte';
+	import { settingsStore } from '$lib/stores/settings';
 </script>
 
-<div class="sidebar">
-	<div class="tabs">
-		<button 
-			class="tab" 
-			class:active={$activeTab === 'notes'} 
-			on:click={() => ($activeTab = 'notes')}
-		>
-			<Notebook size={16} /> Notes
-		</button>
-		<button 
-			class="tab" 
-			class:active={$activeTab === 'files'} 
-			on:click={() => ($activeTab = 'files')}
-		>
-			<Folder size={16} /> Files
-		</button>
-		<button 
-			class="tab" 
-			class:active={$activeTab === 'tasks'} 
-			on:click={() => ($activeTab = 'tasks')}
-		>
-			<ListTodo size={16} /> Tasks
-		</button>
-	</div>
+<div class="sidebar" class:collapsed={$settingsStore.sidebarCollapsed}>
+	{#if !$settingsStore.sidebarCollapsed}
+		<div class="tabs">
+			<button 
+				class="tab" 
+				class:active={$activeTab === 'notes'} 
+				onclick={() => ($activeTab = 'notes')}
+			>
+				<Notebook size={16} /> Notes
+			</button>
+			<button 
+				class="tab" 
+				class:active={$activeTab === 'files'} 
+				onclick={() => ($activeTab = 'files')}
+			>
+				<Folder size={16} /> Files
+			</button>
+			<button 
+				class="tab" 
+				class:active={$activeTab === 'tasks'} 
+				onclick={() => ($activeTab = 'tasks')}
+			>
+				<ListTodo size={16} /> Tasks
+			</button>
+		</div>
 
-	<div class="tab-content">
-		{#if $activeTab === 'notes'}
-			<NotesList />
-		{:else if $activeTab === 'files'}
-			<FileTree />
-		{:else}
-			<TaskList />
-		{/if}
-	</div>
+		<div class="tab-content">
+			{#if $activeTab === 'notes'}
+				<NotesList />
+			{:else if $activeTab === 'files'}
+				<FileTree />
+			{:else}
+				<TaskList />
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -48,9 +51,16 @@
 		height: 100vh;
 		background: #09090b;
 		border-right: 1px solid rgba(255, 255, 255, 0.05);
-		display: flex; /* Restored */
-		flex-direction: column; /* Restored */
+		display: flex;
+		flex-direction: column;
 		flex-shrink: 0;
+		transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		overflow: hidden;
+	}
+
+	.sidebar.collapsed {
+		width: 0px;
+		border-right: none;
 	}
 
 	/* Removed focus-within to prevent double borders */

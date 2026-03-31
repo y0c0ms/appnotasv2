@@ -5,15 +5,17 @@
     let window: any;
     let isMaximized = $state(false);
 
-    onMount(async () => {
-        // Dynamic import to avoid SSR issues and ensure we only run in Tauri
-        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-        window = getCurrentWebviewWindow();
-        
-        // Listen for maximize events to update the icon
-        const unlisten = await window.onResized(async () => {
-            isMaximized = await window.isMaximized();
-        });
+    onMount(() => {
+        let unlisten: (() => void) | undefined;
+
+        (async () => {
+            const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+            window = getCurrentWebviewWindow();
+            
+            unlisten = await window.onResized(async () => {
+                isMaximized = await window.isMaximized();
+            });
+        })();
 
         return () => {
             if (unlisten) unlisten();

@@ -64,32 +64,33 @@ export const AIZone = Extension.create<AIZoneOptions>({
                         return DecorationSet.empty;
                     },
                     apply: (tr, set) => {
-                        // Map existing decorations through the transaction
                         set = set.map(tr.mapping, tr.doc);
-
                         const meta = tr.getMeta('aiZone');
-                        if (meta === null) {
-                            return DecorationSet.empty;
-                        }
-
+                        if (meta === null) return DecorationSet.empty;
                         if (meta) {
                             const { from, to } = meta;
                             const decos = [
-                                Decoration.inline(from, to, {
-                                    class: HTMLAttributes.class,
-                                }),
+                                Decoration.inline(from, to, { class: 'ai-improvement-zone' })
                             ];
                             return DecorationSet.create(tr.doc, decos);
                         }
-
                         return set;
                     },
                 },
                 props: {
                     decorations(state) {
-                        const decos = pluginKey.getState(state);
-
-                        return decos;
+                        return pluginKey.getState(state);
+                    },
+                    handleKeyDown(view, event) {
+                        const dr = pluginKey.getState(view.state);
+                        if (!dr || dr.find().length === 0) return false;
+                        const { selection } = view.state;
+                        const isOverlapping = dr.find().some((deco: any) => 
+                            (selection.from >= deco.from && selection.from <= deco.to) ||
+                            (selection.to >= deco.from && selection.to <= deco.to)
+                        );
+                        if (isOverlapping && event.key !== 'Escape') return true;
+                        return false;
                     },
                 },
             }),

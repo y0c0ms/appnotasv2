@@ -6,8 +6,9 @@
     import { open as openDialog, save as saveDialog, message } from '@tauri-apps/plugin-dialog';
     import { fade, slide } from 'svelte/transition';
     import { geminiService } from '../services/geminiService';
-    import { onMount } from 'svelte';
-    import { X, FolderOpen, Upload, Download } from 'lucide-svelte';
+    import { onMount, tick } from 'svelte';
+    import { X, FolderOpen, Upload, Download, Bug, Trash2 } from 'lucide-svelte';
+	import { consoleStore } from '$lib/stores/consoleStore';
 
     // Shortcut names for display
     const shortcutNames: Record<string, string> = {
@@ -30,6 +31,8 @@
     let availableModels: string[] = ['gemini-2.5-flash'];
     let isLoadingModels = false;
     let isTestingModel = false;
+    let showConsole = false;
+    let consoleContainer: HTMLElement;
     let modelFetchTimeout: ReturnType<typeof setTimeout>;
 
     onMount(() => {
@@ -220,6 +223,28 @@
     $: if ($focusArea === 'settings' && panelElement) {
         panelElement.focus();
     }
+
+    let autoScrollConsole = true;
+
+    function handleConsoleScroll(e: Event) {
+        const target = e.target as HTMLElement;
+        if (!target) return;
+        
+        // Check if user manually scrolled away from the bottom (allow 5px buffer)
+        const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 5;
+        autoScrollConsole = isAtBottom;
+    }
+
+    $: if (consoleContainer && $consoleStore) {
+        if (autoScrollConsole || $consoleStore.length <= 1) {
+            // Deferred fire-and-forget scroll
+            setTimeout(() => {
+                if (consoleContainer) {
+                    consoleContainer.scrollTop = consoleContainer.scrollHeight;
+                }
+            }, 10);
+        }
+    }
 </script>
 
 <div 
@@ -404,6 +429,38 @@
                 <button class="btn-picker" style="flex: 1;" on:click={importSettings}>
                     <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center;"><Download size={16} /> Import Settings</div>
                 </button>
+            </div>
+        </section>
+
+        <section>
+            <h3>Developer</h3>
+            <div class="setting-item column">
+                <button class="btn-picker" style="display: flex; align-items: center; flex-direction: row; width: 100%; justify-content: space-between;" on:click={() => showConsole = !showConsole}>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;"><Bug size={16} /> View App Console</div>
+                    <span>{showConsole ? '▲' : '▼'}</span>
+                </button>
+                
+                {#if showConsole}
+                    <div class="console-viewer-wrapper">
+                        <div class="console-actions">
+                            <span class="hint" style="margin: 0; color: #888;">Live log interceptor</span>
+                            <button class="btn-icon small" on:click={() => consoleStore.clear()} title="Clear console">
+                                <Trash2 size={14} />
+                            </button>
+                        </div>
+                        <div class="console-viewer" bind:this={consoleContainer} on:scroll={handleConsoleScroll}>
+                            {#if $consoleStore.length === 0}
+                                <div class="empty-log">No logs captured yet.</div>
+                            {/if}
+                            {#each $consoleStore as log}
+                                <div class="log-entry type-{log.type}">
+                                    <span class="log-time">[{log.timestamp.toLocaleTimeString()}]</span>
+                                    <span class="log-msg">{log.message}</span>
+                                </div>
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
             </div>
         </section>
     </div>
@@ -737,4 +794,82 @@
         font-size: 0.7rem;
         color: #444;
     }
+
+    /* Console Viewer Styles */
+    .console-viewer-wrapper {
+        width: 100%;
+        margin-top: 0.5rem;
+        border: 1px solid #333;
+        border-radius: 6px;
+        background: #0d1117;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .console-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.3rem 0.5rem;
+        border-bottom: 1px solid #222;
+        background: #161b22;
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+    }
+
+    .btn-icon.small {
+        padding: 0.2rem;
+        color: #888;
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    .btn-icon.small:hover {
+        background: #333;
+        color: #ff4a4a;
+    }
+
+    .console-viewer {
+        height: 200px;
+        overflow-y: auto;
+        padding: 0.5rem;
+        font-family: 'Fira Code', monospace;
+        font-size: 0.75rem;
+        line-height: 1.4;
+    }
+
+    .empty-log {
+        color: #666;
+        font-style: italic;
+        text-align: center;
+        margin-top: 2rem;
+    }
+
+    .log-entry {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 0.3rem;
+        word-break: break-word;
+        border-bottom: 1px solid rgba(255,255,255,0.03);
+        padding-bottom: 0.3rem;
+    }
+
+    .log-entry:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+    }
+
+    .log-time {
+        color: #888;
+        flex-shrink: 0;
+    }
+
+    .type-log { color: #c9d1d9; }
+    .type-info { color: #4a9eff; }
+    .type-warn { color: #d1b82e; }
+    .type-error { color: #ff4a4a; font-weight: 500; }
+
 </style>

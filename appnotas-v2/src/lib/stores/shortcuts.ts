@@ -81,7 +81,6 @@ export function setupGlobalShortcuts() {
         // Save file
         if (matchesKeybind(e, keybinds.save)) {
             e.preventDefault();
-            console.log('Save requested');
             saveRequested.set(true);
             setTimeout(() => saveRequested.set(false), 100);
             return;

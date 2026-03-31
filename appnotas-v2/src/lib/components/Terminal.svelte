@@ -446,6 +446,7 @@
                     class:active={activeSessionId === session.id}
                     bind:this={sessionElements[session.id]}
                     style="display: {visibleSessionIds.includes(session.id) ? 'block' : 'none'};"
+                    role="none"
                     onmousedown={() => { activeSessionId = session.id; focusArea.set('terminal'); }}
                 ></div>
             {/each}
@@ -460,10 +461,13 @@
 
     <!-- Right: Terminal Sidebar (Tabs) -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div 
         class="terminal-sidebar" 
         class:focused={$focusArea === 'terminal-tabs'}
         tabindex="0"
+        role="navigation"
+        aria-label="Terminal sessions"
         bind:this={sidebarEl}
         onkeydown={handleSidebarKeyDown}
         onclick={() => focusArea.set('terminal-tabs')}
@@ -660,7 +664,7 @@
         color: #fff;
     }
 
-    .option-icon {
+    :global(.option-icon) {
         color: #4a9eff;
     }
 

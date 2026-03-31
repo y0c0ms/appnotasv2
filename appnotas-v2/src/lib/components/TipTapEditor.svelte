@@ -112,6 +112,39 @@
     // AI Loading Overlay State
     let showAiLoading = $state(false);
     let aiLoadingPos = $state({ top: 0, left: 0 });
+    let pillRafId: number | null = null;
+
+    function startPillTracking() {
+        if (pillRafId !== null) return; // already running
+        function tick() {
+            computePillPos();
+            pillRafId = requestAnimationFrame(tick);
+        }
+        pillRafId = requestAnimationFrame(tick);
+    }
+
+    function stopPillTracking() {
+        if (pillRafId !== null) {
+            cancelAnimationFrame(pillRafId);
+            pillRafId = null;
+        }
+    }
+
+    function computePillPos() {
+        if (!editor || !editor.view || !editor.view.dom || !element) return;
+        const zones = (editor.storage as any).aiZone?.zones || [];
+        if (zones.length === 0) return;
+        const { from, to } = zones[0];
+        try {
+            const midPos = Math.max(from, Math.min(to, Math.floor((from + to) / 2)));
+            const midCoords = editor.view.coordsAtPos(midPos);
+            const containerRect = element!.getBoundingClientRect();
+            aiLoadingPos = {
+                top: midCoords.top + (midCoords.bottom - midCoords.top) / 2,
+                left: containerRect.left + containerRect.width / 2
+            };
+        } catch (_) {}
+    }
 
 	// State to re-render when editor is ready
 	let isReady = $state(false);
@@ -130,45 +163,47 @@
 
 	let editorZoom = $derived($settingsStore.zoomLevel || 1.0);
 
-    function updateAiLoadingPosition() {
-        if (!editor || !editor.view || !editor.view.dom) {
-            showAiLoading = false;
-            return;
+    // Reactive sync for AI Loading state
+    $effect(() => {
+        if (editor && isReady && element) {
+            const sync = () => {
+                const zones = (editor!.storage as any).aiZone?.zones || [];
+                if (zones.length > 0) {
+                    updateAiLoadingPosition();
+                } else if (showAiLoading) {
+                    showAiLoading = false;
+                }
+            };
+
+            editor.on('transaction', sync);
+            editor.on('update', sync);
+            element!.addEventListener('scroll', sync);
+            window.addEventListener('scroll', sync, true);
+            sync();
+
+            return () => {
+                editor!.off('transaction', sync);
+                editor!.off('update', sync);
+                element!.removeEventListener('scroll', sync);
+                window.removeEventListener('scroll', sync, true);
+            };
         }
+    });
 
-        const hasZone = (editor.storage as any).aiZone?.zones?.length > 0;
-        
-        if (hasZone) {
-            const dom = editor.view.dom;
-           // We use global selector because styles are global, but scoped to this editor instance?
-           // Ideally we scope to this editor element.
-           const zones = dom.querySelectorAll('.ai-improvement-zone');
-            
-           // console.log(`[TipTap] updating AI loading pos. Zones found: ${zones.length}`);
-
-           if (zones.length > 0) {
-                let minTop = Infinity, maxBottom = -Infinity, minLeft = Infinity, maxRight = -Infinity;
-                
-                zones.forEach(zone => {
-                    const rect = zone.getBoundingClientRect();
-                    if (rect.top < minTop) minTop = rect.top;
-                    if (rect.bottom > maxBottom) maxBottom = rect.bottom;
-                    if (rect.left < minLeft) minLeft = rect.left;
-                    if (rect.right > maxRight) maxRight = rect.right;
-                });
-                
-                if (minTop === Infinity) return;
-
-                const top = minTop + (maxBottom - minTop) / 2;
-                const left = minLeft + (maxRight - minLeft) / 2;
-                
-                aiLoadingPos = { top, left };
+    function updateAiLoadingPosition() {
+        const zones = (editor?.storage as any)?.aiZone?.zones || [];
+        if (zones.length > 0) {
+            if (!showAiLoading) {
+                computePillPos(); // snap to position immediately
                 showAiLoading = true;
-                return;
+                startPillTracking(); // start 60fps tracking
+            }
+        } else {
+            if (showAiLoading) {
+                showAiLoading = false;
+                stopPillTracking();
             }
         }
-        
-        showAiLoading = false;
     }
 
     // Portal action dummy for now if not found, to avoid breaking if it was missing.
@@ -276,6 +311,93 @@
                     text-decoration: line-through;
                     opacity: 0.6;
                     color: #888;
+                }
+
+                /* --- AI LOCK (CLEAN/PREMIUM) --- */
+                .ai-improvement-zone {
+                    background-color: rgba(74, 158, 255, 0.1) !important;
+                    border-radius: 4px;
+                    box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.3) !important;
+                    position: relative;
+                    pointer-events: none !important;
+                    user-select: none !important;
+                    opacity: 0.9 !important;
+                    border-bottom: 2px solid rgba(74, 158, 255, 0.6) !important;
+                }
+                
+                .ai-zone-spinner-widget {
+                    display: flex !important;
+                    align-items: center !important;
+                    gap: 10px !important;
+                    background: rgba(30, 30, 30, 0.95) !important;
+                    color: #e0e0e0 !important;
+                    padding: 8px 16px !important;
+                    border-radius: 20px !important;
+                    border: 1px solid #555 !important;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
+                    z-index: 100 !important;
+                    pointer-events: none !important;
+                    font-family: inherit !important;
+                    font-weight: 500 !important;
+                    font-size: 0.85rem !important;
+                    white-space: nowrap !important;
+                    width: fit-content !important;
+                    margin: 8px auto !important;
+                }
+                
+                .ai-zone-spinner-widget .spinner {
+                    width: 16px !important;
+                    height: 16px !important;
+                    border: 2px solid #555 !important;
+                    border-top-color: #4a9eff !important;
+                    border-radius: 50% !important;
+                    animation: spin 1s linear infinite !important;
+                }
+
+                /* AI Action Buttons (Compact/Premium Alignment) */
+                .ai-proposal-actions {
+                    display: inline-flex !important;
+                    flex-direction: row !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    gap: 12px !important;
+                    background: #1c2128 !important;
+                    border: 1px solid #30363d !important;
+                    padding: 6px 12px !important;
+                    border-radius: 10px !important;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.8) !important;
+                    margin: 10px 0 !important;
+                    z-index: 100 !important;
+                    width: fit-content !important;
+                    pointer-events: auto !important;
+                }
+                .ai-btn {
+                    padding: 5px 14px !important;
+                    border-radius: 6px !important;
+                    font-weight: 800 !important;
+                    font-size: 13px !important;
+                    cursor: pointer !important;
+                    color: white !important;
+                    border: none !important;
+                    transition: all 0.2s !important;
+                    white-space: nowrap !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    gap: 6px !important;
+                }
+                .ai-accept {
+                    background: #238636 !important;
+                }
+                .ai-reject {
+                    background: #da3633 !important;
+                }
+                .ai-btn:hover {
+                    filter: brightness(1.2) !important;
+                }
+                
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
                 }
 
                 /* File Link Widget Stylings */
@@ -626,14 +748,14 @@
 		style="transform: scale({editorZoom}); transform-origin: top left;"
 	></div>
 
-    <!-- AI Loading Overlay -->
+    <!-- AI Working Pill: fixed + rAF tracking (follows text on scroll) -->
     {#if showAiLoading}
         <div 
-            use:portal
             class="ai-zone-spinner-widget"
-            style="position: fixed; top: {aiLoadingPos.top}px; left: {aiLoadingPos.left}px; margin: 0; pointer-events: none; z-index: 99999;"
+            style="position: fixed; top: {aiLoadingPos.top}px; left: {aiLoadingPos.left}px; transform: translate(-50%, -50%); z-index: 9999; margin: 0; pointer-events: none;"
         >
             <div class="spinner"></div>
+            <span>AI Working...</span>
         </div>
     {/if}
 	

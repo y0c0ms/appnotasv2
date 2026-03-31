@@ -302,8 +302,7 @@ export async function saveNoteToFile(id: string, content: string, newTitle?: str
         // Update local state in both lists
         const updateFn = (nList: Note[]) => 
             nList.map(n => n.id === id
-                // We keep content in the store only if it already had content (e.g. tasks)
-                ? { ...n, content: n.content ? content : '', title: titleToSave, updated_at: new Date().toISOString() }
+                ? { ...n, content, title: titleToSave, updated_at: new Date().toISOString() }
                 : n
             );
 

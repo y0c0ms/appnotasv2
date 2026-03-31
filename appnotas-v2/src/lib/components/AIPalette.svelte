@@ -94,8 +94,11 @@
             activeEditor.commands.setAIZone(from, to);
         }
 
-        // 2. Close the palette immediately
-        onClose();
+        // 2. Set loading state and close shortly after to allow "Generating" message to show
+        loading = true;
+        setTimeout(() => {
+            onClose();
+        }, 500);
 
         // 3. Run generation in background
         runBackgroundGeneration(enhancedPrompt, enhancedContext, activeEditor, codeMirrorEditor, currentCmSelection);

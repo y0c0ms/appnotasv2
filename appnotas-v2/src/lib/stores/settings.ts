@@ -21,6 +21,7 @@ export interface AppSettings {
     defaultShell: string;
     selectedTaskFileId: string;
     editorFont: string;
+    sidebarCollapsed: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -57,7 +58,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     autostart: false,
     defaultShell: 'powershell',
     selectedTaskFileId: '',
-    editorFont: 'Inter'
+    editorFont: 'Inter',
+    sidebarCollapsed: false
 };
 
 let settingsPath = ''; 
@@ -73,6 +75,9 @@ function createSettingsStore() {
         set,
         update,
         init: async () => {
+            if (settingsInitialized) return;
+            settingsInitialized = true; // Lock immediately to prevent race conditions
+            
             try {
                 // 1. Get the safe config path from Rust
                 settingsPath = await invoke<string>('get_config_path');
@@ -156,6 +161,9 @@ function createSettingsStore() {
                 return newSettings;
             });
         },
+        toggleSidebar: () => {
+            update(s => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed }));
+        },
         toggleAutostart: async () => {
             const current = get(settingsStore);
             const newState = !current.autostart;
@@ -185,7 +193,6 @@ export const settingsStore = createSettingsStore();
 // Auto-save any change after initialization
 settingsStore.subscribe(async (s) => {
     if (settingsInitialized) {
-        console.log('💾 Auto-saving settings to:', settingsPath);
         await settingsStore.save();
     }
 });

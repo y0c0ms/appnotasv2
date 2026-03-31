@@ -30,15 +30,21 @@
     let aiEditorInstance = $state<any>(null);
 
 	onMount(() => {
-		settingsStore.init();
-
 		const handleGlobalToggle = () => {
 			settingsStore.toggleMenus();
 		};
 		window.addEventListener('toggle-editor-menus', handleGlobalToggle);
 		
+		const handleRequestSave = () => {
+			if (currentNoteId && isDirty) {
+				saveSpecificNote(currentNoteId, localContent, localTitle);
+			}
+		};
+		window.addEventListener('app:request-save', handleRequestSave);
+		
 		return () => {
 			window.removeEventListener('toggle-editor-menus', handleGlobalToggle);
+			window.removeEventListener('app:request-save', handleRequestSave);
 		};
 	});
 
@@ -117,7 +123,6 @@
             } else if ($activeNoteContent !== localContent && !isDirty) {
                 // If the same note was updated externally (e.g. by Overlay) 
                 // and we don't have local unsaved changes, accept the new content.
-                console.log('🔄 Accepting external content update for:', $activeNote.title);
                 localContent = $activeNoteContent;
                 localTitle = $activeNote.title;
                 title = $activeNote.title;
@@ -151,7 +156,6 @@
 			if (!originalNote) return;
 
 			await saveNoteToFile(originalNote.id, content, noteTitle);
-			console.log('Saved note:', noteTitle);
 
 			// If we just saved the currently active note, clear dirty flag
 			if (id === currentNoteId) {
@@ -323,15 +327,18 @@
 			{#key $activeNote.id}
 				<TipTapEditor
 					bind:this={editor}
-					content={$activeNote.content}
+					content={localContent}
 					onUpdate={handleContentUpdate}
 					onCommandTrigger={() => (showCommandPalette = true)}
 					onAITrigger={(ctx, editorInst) => {
-                        // Attach editor to context to ensure it arrives
+                        // Attach editor directly to the prop-bound state
                         if (editorInst) {
+                            aiEditorInstance = editorInst;
                             (ctx as any).editor = editorInst;
                         } else if (editor) {
-                            (ctx as any).editor = editor.getEditor();
+                            const tiptap = editor.getEditor();
+                            aiEditorInstance = tiptap;
+                            (ctx as any).editor = tiptap;
                         }
 
 						aiContext = ctx;

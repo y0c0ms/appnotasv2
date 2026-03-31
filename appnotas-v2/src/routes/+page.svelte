@@ -17,6 +17,7 @@
 		deleteNoteFile,
 		reloadNoteFromDisk,
 		applyExternalContent,
+		activeNoteContent,
 		taskNotesList
 	} from '$lib/stores/notes';
 	import { openFiles, activeFile, currentDirectory, terminalVisible, terminalHeight } from '$lib/stores/files';
@@ -24,6 +25,7 @@
 	import { focusArea } from '$lib/stores/focus';
 	import { settingsStore } from '$lib/stores/settings';
     import { aiState } from '$lib/stores/ai';
+	import { consoleStore } from '$lib/stores/consoleStore';
 	import type { Note } from '$lib/stores/notes';
 	import type { OpenFile } from '$lib/stores/files';
 
@@ -37,7 +39,7 @@
 	import RefreshDiffModal from '$lib/components/RefreshDiffModal.svelte';
 	import WindowControls from '$lib/components/WindowControls.svelte';
 	import { detectLanguage } from '$lib/utils/files';
-	import { FolderTree, Notebook, ListTodo, RefreshCw, FilePlus2, ListPlus } from 'lucide-svelte';
+	import { FolderTree, Notebook, ListTodo, RefreshCw, FilePlus2, ListPlus, PanelLeft } from 'lucide-svelte';
 
 	let loading = $state(true);
 	let error = $state('');
@@ -237,6 +239,7 @@
         
         // Use an IIFE for async setup
         (async () => {
+			consoleStore.init(); // Initialize log interception
             await settingsStore.init();
             await initNotes(); // Start listening for sync events
             console.log('✅ Shortcuts initialized and settings loaded');
@@ -245,7 +248,6 @@
             const dir = settings.notesDirectory;
 
             if (dir) {
-                console.log('📂 Loading saved notes directory:', dir);
                 try {
                     await setNotesDirectory(dir);
                 } catch (e) {
@@ -310,9 +312,17 @@
 		const diskContent = await reloadNoteFromDisk(note.id);
 		if (diskContent === null) return;
 
-		// Compare with current store content
-		if (diskContent.trim() !== note.content.trim()) {
-			diffOldContent = note.content;
+		// Use activeNoteContent for active note to ensure we compare against live editor state
+		// rather than the (potentially empty) store object from the list.
+		const currentActiveId = get(activeNoteId);
+		const currentNoteContent = get(activeNoteContent);
+		
+		const currentLocalContent = (currentActiveId === note.id && currentNoteContent) 
+			? currentNoteContent 
+			: (note.content || '');
+
+		if (diskContent.trim() !== currentLocalContent.trim()) {
+			diffOldContent = currentLocalContent;
 			diffNewContent = diskContent;
 			diffNoteTitle = note.title;
 			diffNoteId = note.id;
@@ -332,6 +342,13 @@
 
 		isRefreshing = true;
 		try {
+			// 1. Force the current editor to save its content to disk first
+			window.dispatchEvent(new CustomEvent('app:request-save'));
+			
+			// 2. Wait a moment for the save to hit the store/disk
+			await tick();
+			await new Promise(r => setTimeout(r, 100)); // Small buffer for disk IO
+
 			await checkForDiskChanges(note);
 			if (!showDiffModal) {
 				// No changes detected, briefly flash the button
@@ -474,7 +491,10 @@
 	<div class="main-grid" class:show-settings={$settingsOpen}>
 		<div class="editor-section">
 			<header data-tauri-drag-region>
-				<div class="header-branding">
+				<div class="header-branding" style="display: flex; align-items: center; gap: 0.5rem; padding-left: 0.5rem;">
+					<button class="btn-icon" onclick={() => settingsStore.toggleSidebar()} title="Toggle Sidebar">
+						<PanelLeft size={18} />
+					</button>
 					<img src="/app-logo.png" alt="AppNotas" class="header-logo" />
 				</div>
 				<div class="header-actions">
@@ -743,7 +763,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 0 0 0 1.5rem; /* Remove right padding for window controls */
+		padding: 0 0 0 0.5rem; /* Reduced to fit the toggle button nicely */
 		height: 48px; /* Fixed height for title bar feel */
 		border-bottom: 1px solid #2a2a2a;
 		background: #1a1a1a;
