@@ -29,7 +29,8 @@
     "autostart:default",
     "global-shortcut:default",
     "http:default",
-    "http:allow-request",
+    "http:allow-fetch",
+    "http:allow-fetch-send",
     "pty:default"
   ]
 }
