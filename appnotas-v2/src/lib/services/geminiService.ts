@@ -1,7 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import type { Part } from "@google/generative-ai";
 import { get } from "svelte/store";
 import { settingsStore } from "../stores/settings";
+
+// --- Connectivity Fix for Corporate/Restricted Environments ---
+// We use the Tauri HTTP plugin's fetch to bypass CORS and organizational proxies.
+// This handles requests in the Rust backend instead of the browser frontend.
+const fetch = tauriFetch as any;
 
 export type AIModel = string;
 
@@ -110,8 +116,11 @@ class GeminiService {
     async getAvailableModels(apiKey: string): Promise<string[]> {
         if (!apiKey) return [];
         try {
-            console.log(`[GeminiService] Fetching models...`);
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+            console.log(`[GeminiService] Fetching models via Tauri HTTP plugin...`);
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+                method: 'GET',
+                connectTimeout: 30000
+            });
             if (!response.ok) throw new Error(`Failed to fetch models: ${response.statusText}`);
 
             const data = await response.json();
