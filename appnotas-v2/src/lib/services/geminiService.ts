@@ -26,7 +26,7 @@ class GeminiService {
             console.error("[GeminiService] No API Key found in settings!");
             throw new Error("Gemini API Key not found in settings.");
         }
-        console.log(`[GeminiService] Initializing with key: ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`);
+        console.log("[GeminiService] Initializing Gemini client with configured API key.");
         this.genAI = new GoogleGenerativeAI(apiKey);
     }
 
