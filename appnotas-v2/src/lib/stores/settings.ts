@@ -52,7 +52,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     notesDirectory: '',
     lastActiveNoteId: '',
     lastActiveTaskId: '',
-    aiModelPreference: 'gemini-2.0-flash',
+    aiModelPreference: 'gemini-1.5-flash',
     zoomLevel: 1.0,
     pinnedNoteIds: [],
     autostart: false,

@@ -117,24 +117,39 @@ class GeminiService {
         if (!apiKey) return [];
         try {
             console.log(`[GeminiService] Fetching models via Tauri HTTP plugin...`);
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+            
+            const response = await fetch(url, {
                 method: 'GET',
                 connectTimeout: 30000
             });
-            if (!response.ok) throw new Error(`Failed to fetch models: ${response.statusText}`);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const msg = errorData.error?.message || response.statusText || `HTTP ${response.status}`;
+                throw new Error(`Failed to fetch models: ${msg}`);
+            }
 
             const data = await response.json();
-            if (!data.models) return [];
+            if (!data.models || !Array.isArray(data.models)) {
+                console.warn("[GeminiService] Unexpected API response format:", data);
+                return ['gemini-1.5-flash']; // Return at least our standard default
+            }
 
-            return data.models
+            const filtered = data.models
                 .filter((m: any) =>
                     m.name.includes('gemini') &&
                     m.supportedGenerationMethods?.includes('generateContent')
                 )
                 .map((m: any) => m.name.replace('models/', ''))
                 .sort();
+
+            console.log(`[GeminiService] Found ${filtered.length} valid Gemini models.`);
+            return filtered.length > 0 ? filtered : ['gemini-1.5-flash'];
         } catch (e) {
-            console.error("[GeminiService] Failed to load models:", e);
+            console.error("[GeminiService] Model fetch failed:", e);
+            // Don't re-throw if we can at least provide the defaults, 
+            // but for settings page we want to know it failed.
             throw e;
         }
     }

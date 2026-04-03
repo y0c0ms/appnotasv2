@@ -28,7 +28,7 @@
     };
 
     let recordingShortcut: string | null = null;
-    let availableModels: string[] = ['gemini-2.5-flash'];
+    let availableModels: string[] = ['gemini-1.5-flash'];
     let isLoadingModels = false;
     let isTestingModel = false;
     let showConsole = false;
@@ -369,7 +369,7 @@
                     disabled={isLoadingModels}
                 >
                     {#if availableModels.length === 0}
-                         <option value="gemini-2.5-flash">Default (Gemini 2.5 Flash)</option>
+                         <option value="gemini-1.5-flash">Default (Gemini 1.5 Flash)</option>
                     {/if}
                     {#each availableModels as model}
                         <option value={model}>{model}</option>
