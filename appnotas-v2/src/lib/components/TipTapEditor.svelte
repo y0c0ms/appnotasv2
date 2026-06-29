@@ -7,6 +7,7 @@
 	import Placeholder from '@tiptap/extension-placeholder';
 	import TaskList from '@tiptap/extension-task-list';
 	import TaskItem from '@tiptap/extension-task-item';
+	import { TableKit } from '@tiptap/extension-table';
 	import { AIProposal } from '../tiptap/extensions/AIProposal';
 	import Paragraph from '@tiptap/extension-paragraph';
     import '../tiptap/TipTapEditor.css';
@@ -428,6 +429,58 @@
                     margin-right: 4px;
                     opacity: 0.8;
                 }
+
+                /* --- Tables (GFM) --- */
+                .tiptap-editor table {
+                    border-collapse: collapse;
+                    table-layout: fixed;
+                    width: 100%;
+                    margin: 1rem 0;
+                    overflow: hidden;
+                    font-size: 0.95em;
+                }
+                .tiptap-editor table td,
+                .tiptap-editor table th {
+                    border: 1px solid #4a5260 !important;
+                    padding: 0.45rem 0.6rem !important;
+                    vertical-align: top;
+                    box-sizing: border-box;
+                    position: relative;
+                    min-width: 1.5em;
+                }
+                .tiptap-editor table th {
+                    background: #20262f;
+                    font-weight: 600;
+                    text-align: left;
+                }
+                .tiptap-editor table td > *,
+                .tiptap-editor table th > * {
+                    margin: 0 !important;
+                }
+                .tiptap-editor table .selectedCell::after {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    background: rgba(74, 158, 255, 0.18);
+                    pointer-events: none;
+                }
+                .tiptap-editor table .column-resize-handle {
+                    position: absolute;
+                    right: -2px;
+                    top: 0;
+                    bottom: -2px;
+                    width: 4px;
+                    background: #4a9eff;
+                    cursor: col-resize;
+                    pointer-events: none;
+                }
+                .tiptap-editor.resize-cursor {
+                    cursor: col-resize;
+                }
+                .tiptap-editor .tableWrapper {
+                    overflow-x: auto;
+                    margin: 1rem 0;
+                }
             `;
             document.head.appendChild(style);
         }
@@ -489,6 +542,12 @@
                     },
                 }),
 				AIProposal,
+				// GFM tables. Disabled in task-checklist notes (which are list-only).
+				// tiptap-markdown auto-serializes the `table` node back to pipe-table
+				// Markdown and markdown-it parses tables on load, so round-trips cleanly.
+				...(isTaskNote ? [] : [TableKit.configure({
+					table: { resizable: true, HTMLAttributes: { class: 'tiptap-table' } },
+				})]),
 				BubbleMenu.configure({
 					pluginKey: 'bubbleMenu',
 					shouldShow: ({ state, from, to }) => {
