@@ -1,0 +1,56 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# --- Virtual environment (uv) ---
+.venv/
+venv/
+
+# --- Build / packaging ---
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Test & coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+
+# --- Type checkers ---
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# --- Linters / formatters ---
+.ruff_cache/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- macOS ---
+.DS_Store
+
+# --- Editors ---
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Docker ---
+*.dockerignore

@@ -1,0 +1,196 @@
+name: Microservice-AppnotasMcp-$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include:
+      - '*'
+
+pr: none
+
+pool:
+  name: pt-managed-pool-pvt # Name of Managed DevOps Pool
+  demands:
+  - ImageOverride -equals ubuntu-latest # Alias of the image
+
+
+variables:
+- group: deploymentVariables
+- name: imageName
+  value: 'gad/ms-appnotas-mcp'
+- name: applicationName
+  value: 'ms-appnotas-mcp'
+- name: sharedWorkDir
+  value: '$(Build.SourcesDirectory)'
+
+
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: JM-Architecture-and-Devops/cicd-templates
+      ref: refs/heads/main
+      endpoint: SharedRepoAccess
+
+stages:
+  - stage: Build
+    displayName: Build & Test Python App
+    jobs:
+      - job: PythonBuild
+        displayName: Build and Test with Python
+
+        steps:
+          - checkout: self
+
+          - script: |
+              echo "� Installing uv..."
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              echo "##vso[task.prependpath]$HOME/.local/bin"
+            displayName: Install uv
+
+          - script: |
+              echo "🐍 Verifying uv and Python installation..."
+              uv --version
+              uv run python --version
+            displayName: Verify uv and Python
+
+          - script: |
+              echo "📦 Installing all dependencies..."
+              uv sync
+            displayName: Install Dependencies
+
+          - script: |
+              echo "🧪 Running unit tests..."
+              uv run pytest \
+                --tb=short \
+                --verbose \
+                --junitxml=test-results.xml \
+                --cov \
+                --cov-report=xml:coverage.xml \
+                --cov-report=term-missing
+            displayName: Run Unit Tests
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: test-results.xml
+              failTaskOnFailedTests: true
+            displayName: Publish Test Results
+
+          - task: PublishCodeCoverageResults@2
+            condition: succeededOrFailed()
+            inputs:
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
+            displayName: Publish Code Coverage
+
+          - script: |
+              echo "📦 Building Python package..."
+              uv build
+              echo "✅ Build artifacts created in dist/"
+            displayName: Build Python Package
+
+  - stage: SonarQubeScan
+    displayName: Static Analysis (SAST)
+    condition: |
+      and(
+        succeeded('Build'),
+        eq(variables['Build.SourceBranchName'], 'main')
+      )
+    jobs:
+      - job: SonarScanJob
+        displayName: SonarQube Analysis
+        steps:
+          - checkout: self
+
+          - script: |
+              echo "Preparing SonarQube analysis..."
+              cd $(sharedWorkDir)
+              pwd
+              ls -alh
+            displayName: Verify Working Directory
+
+          - template: azure-pipelines/templates/sonarqube-scanv2.yml@templates
+            parameters:
+              sonarServiceConnection: 'SonarQA'
+              sonarProjectKey: '$(SONARQUBE_PROJECT_KEY)'
+              sonarProjectName: '$(applicationName)'
+              sourceDirectory: '$(sharedWorkDir)'
+
+  - stage: DeployQUA
+    displayName: Deploy to QUA
+    dependsOn:
+      - Build
+      - SonarQubeScan
+    condition: in(dependencies.Build.result, 'Succeeded')
+    jobs:
+      - deployment: DeployQua
+        displayName: 'Deploy to QUA Environment'
+        environment: QUA
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - script: |
+                    echo "Deploying $(applicationName) to ${{ variables.targetEnv }}"
+                    echo "Trigger: $(Build.Reason)"
+                    echo "Branch: $(Build.SourceBranchName)"
+                    echo "Environment: ${{ variables.targetEnv }}"
+                  displayName: Deployment Info
+
+                - script: |
+                    mkdir -p "${HOME}/.config/containers"
+                    printf '[engine]\nruntime = "runc"\ncgroup_manager = "cgroupfs"\n' \
+                      > "${HOME}/.config/containers/containers.conf"
+                    echo "✅ Podman: runc + cgroupfs"
+                  displayName: Configure Podman for Ubuntu 24.04
+
+                - template: azure-pipelines/templates/deploy-v2.yml@templates
+                  parameters:
+                    applicationName: $(applicationName)
+                    imageName: $(imageName)
+                    deployEnv: 'qua'
+                    workingDirectory: $(sharedWorkDir)
+                    registry: $(registry)
+                    dockerUsername: $(DOCKER_USERNAME)
+                    dockerPassword: $(DOCKER_PASSWORD)
+                    gitopsRepo: $(appsInfraRepoURL)
+                    patToken: $(REPO_PAT_TOKEN)
+
+  - stage: DeployPRD
+    displayName: Deploy to PRD
+    dependsOn: DeployQUA
+    condition: |
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranchName'], 'main')
+      )
+    jobs:
+      - deployment: DeployToPRD
+        displayName: Deploy to PRD Environment
+        environment: PRD
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+
+                - script: |
+                    mkdir -p "${HOME}/.config/containers"
+                    printf '[engine]\nruntime = "runc"\ncgroup_manager = "cgroupfs"\n' \
+                      > "${HOME}/.config/containers/containers.conf"
+                    echo "✅ Podman: runc + cgroupfs"
+                  displayName: Configure Podman for Ubuntu 24.04
+
+                - template: azure-pipelines/templates/deploy-v2.yml@templates
+                  parameters:
+                    applicationName: $(applicationName)
+                    imageName: $(imageName)
+                    deployEnv: 'prd'
+                    workingDirectory: $(sharedWorkDir)
+                    registry: $(registry)
+                    dockerUsername: $(DOCKER_USERNAME)
+                    dockerPassword: $(DOCKER_PASSWORD)
+                    gitopsRepo: $(appsInfraRepoURL)
+                    patToken: $(REPO_PAT_TOKEN)

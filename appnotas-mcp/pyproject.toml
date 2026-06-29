@@ -1,0 +1,64 @@
+[project]
+name = "appnotas-mcp"
+version = "0.1.0"
+description = "Local read/write access to AppNotas markdown notes and tasks."
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "mcp[cli]",
+    "pydantic>=2",
+    "pydantic-settings",
+    "python-dotenv",
+    "httpx",
+    "structlog",
+    "truststore",
+    "markdown-it-py",
+    "mdit-py-plugins",
+    "playwright",
+]
+
+[project.scripts]
+serve = "app.__main__:main"
+serve-stdio = "app.stdio:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "httpx",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["mcp.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# FastMCP decorators are not fully typed in the SDK
+module = ["app.mcp_server.tools", "app.mcp_server.resources", "app.mcp_server.prompts"]
+disallow_untyped_decorators = false
