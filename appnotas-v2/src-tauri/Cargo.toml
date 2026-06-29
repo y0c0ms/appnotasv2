@@ -23,7 +23,6 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.0.0", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-log = "2"
-tauri-plugin-http = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -31,3 +30,35 @@ tauri-plugin-global-shortcut = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-pty = "0.2.1"
 tokio = { version = "1", features = ["time"] }
+# Filesystem watcher so the app refreshes when the notes folder is changed
+# externally (e.g. by the local MCP server or OneDrive sync).
+notify = "6"
+# Direct reqwest client for AI calls.
+# - `native-tls`: use the OS TLS stack (Schannel on Windows / OpenSSL on Linux),
+#   which validates against the OS certificate store. Corporate TLS-inspecting
+#   proxies like Zscaler — whose root CA IT installs there — are trusted, and it
+#   needs no C crypto libraries (no aws-lc-rs/ring), keeping the build light.
+# - `system-proxy`: pick up an OS-level proxy (common with Zscaler) in addition
+#   to HTTP(S)_PROXY env vars, which reqwest already honours.
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy", "json"] }
+dirs = "6"
+# Pure note logic (search) — kept in its own crate so it can be unit-tested
+# without linking the GUI/WebView stack. Test with: cargo test -p notes-core
+notes-core = { path = "notes-core" }
+
+# Windows-only: read the registry to detect installed WSL distros without
+# spawning the interactive wsl.exe stub. Not compiled on Linux/macOS.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[workspace]
+members = ["notes-core"]
+
+# Smaller, lighter release binary: size-optimized, link-time optimized,
+# symbols stripped. Trims the shipped binary substantially vs. the default.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

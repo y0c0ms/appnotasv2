@@ -9,13 +9,10 @@
 	let listContainer = $state<HTMLElement>();
 	let searchInput = $state<HTMLInputElement>();
 
-	// Sort filtered notes: pinned first, then by updated_at (descending)
-    // Note: $filteredNotes is a store value, so we use $derived to track it.
 	let sortedNotes = $derived([...$filteredNotes].sort((a, b) => {
 		if (a.pinned && !b.pinned) return -1;
 		if (!a.pinned && b.pinned) return 1;
-		// Secondary sort by date if needed, though filteredNotes might already be sorted
-		return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+		return b.updated_at.localeCompare(a.updated_at);
 	}));
 
     $effect(() => {
@@ -40,7 +37,8 @@
     $effect(() => {
         if ($focusArea === 'list' && listContainer) {
             tick().then(() => {
-                if (listContainer && document.activeElement !== listContainer && document.activeElement !== searchInput) {
+                // contains() so focus on a child note item isn't stolen by the container
+                if (listContainer && !listContainer.contains(document.activeElement) && document.activeElement !== searchInput) {
                     listContainer.focus({ preventScroll: true });
                 }
             });
@@ -97,10 +95,11 @@
 		<div class="search-icon-wrapper">
 			<Search size={14} color="#888" />
 		</div>
-		<input 
-			type="text" 
+		<input
+			type="text"
 			class:focused={$focusArea === 'note-search'}
-			placeholder="Search notes..." 
+			placeholder="Search notes..."
+			data-focus-area="note-search"
 			bind:value={$searchQuery}
 			bind:this={searchInput}
 			onfocus={() => focusArea.set('note-search')}
@@ -119,10 +118,11 @@
 		/>
 	</div>
 
-	<div 
-		class="notes-list" 
+	<div
+		class="notes-list"
 		class:focused={$focusArea === 'list'}
 		onkeydown={handleKeyDown}
+		data-focus-area="list"
 		tabindex="0"
 		role="listbox"
 		aria-label="Notes List"

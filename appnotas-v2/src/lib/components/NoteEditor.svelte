@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { activeNote, activeNoteContent, notesList, taskNotesList, saveNoteToFile, setNoteColor } from '$lib/stores/notes';
+	import { activeNote, activeNoteContent, notesList, taskNotesList, saveNoteToFile, setNoteColor, externalChange, reloadNoteFromDisk } from '$lib/stores/notes';
 	import {
 		colorChangeRequested,
 		codeInsertRequested,
@@ -91,6 +91,10 @@
 	// Auto-focus editor when focusArea switches to 'editor'
     $effect(() => {
         if ($focusArea === 'editor' && editor) {
+            // If DOM focus is already inside the editor region (e.g. the title
+            // input), don't yank it into the editor body
+            const active = document.activeElement;
+            if (active && active.closest('[data-focus-area="editor"]')) return;
             const tiptap = editor.getEditor();
             if (tiptap && !tiptap.isFocused) {
                 tiptap.commands.focus();
@@ -103,6 +107,24 @@
 	let localTitle = $state('');
 	let currentNoteId = $state('');
 	let isDirty = $state(false); // Track if we actually have unsaved changes
+	let lastExternalSeq = 0;
+
+	// When the open note's file is changed externally (MCP/OneDrive) and we have
+	// NO unsaved local edits, pull the new content from disk instead of letting
+	// our stale buffer overwrite it on the next autosave. If dirty, we leave the
+	// user's edits alone (their next save wins).
+	$effect(() => {
+		const ec = $externalChange;
+		if (ec.seq === lastExternalSeq) return;
+		lastExternalSeq = ec.seq;
+		if (!currentNoteId || isDirty) return;
+		const fname = currentNoteId.toLowerCase();
+		const touched = ec.paths.some(p => p.replace(/\\/g, '/').toLowerCase().endsWith('/' + fname));
+		if (!touched) return;
+		reloadNoteFromDisk(currentNoteId).then(body => {
+			if (body !== null && !isDirty) activeNoteContent.set(body);
+		});
+	});
 
 	// Sync local state when active note changes (either ID or content)
     $effect(() => {
@@ -309,9 +331,10 @@
 	/>
 {/if}
 
-<div 
-	class="note-editor" 
+<div
+	class="note-editor"
 	class:focused={$focusArea === 'editor'}
+	data-focus-area="editor"
 	style="{backgroundStyle} {borderStyle}"
 >
 	<input

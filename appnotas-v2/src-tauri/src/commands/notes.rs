@@ -25,6 +25,10 @@ struct NoteFrontmatter {
 
 // Parse markdown frontmatter
 fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
+    // Defensive: strip a leading UTF-8 BOM if some external tool added one
+    // (a BOM before `---` would otherwise break this parser).
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+
     if !content.starts_with("---") {
         return None;
     }
@@ -41,7 +45,7 @@ fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
     let mut title = String::new();
     let mut created = String::new();
     let mut modified = String::new();
-    let tags = vec![];
+    let mut tags: Vec<String> = vec![];
     let mut color = None;
 
     for line in frontmatter_str.lines() {
@@ -53,6 +57,16 @@ fn parse_frontmatter(content: &str) -> Option<(NoteFrontmatter, String)> {
                 "created" => created = value.to_string(),
                 "modified" => modified = value.to_string(),
                 "color" => color = Some(value.to_string()),
+                "tags" => {
+                    // e.g. `tags: [a, b]` — preserve so app saves don't wipe
+                    // tags that the external MCP set.
+                    let inner = value.trim().trim_start_matches('[').trim_end_matches(']');
+                    tags = inner
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
                 _ => {}
             }
         }
@@ -171,7 +185,11 @@ pub async fn list_notes_files(directory: String, include_content: bool) -> Resul
 }
 
 #[tauri::command]
-pub async fn create_note_file(directory: String, title: String) -> Result<Note, String> {
+pub async fn create_note_file(
+    directory: String,
+    title: String,
+    watcher: tauri::State<'_, crate::watcher::WatcherState>,
+) -> Result<Note, String> {
     let filename = generate_filename(&title);
     let path = Path::new(&directory);
 
@@ -194,6 +212,7 @@ pub async fn create_note_file(directory: String, title: String) -> Result<Note, 
         color: None,
     };
 
+    watcher.mark_self_write(&file_path.to_string_lossy());
     let markdown = create_markdown(&note);
     fs::write(&file_path, markdown).map_err(|e| e.to_string())?;
 
@@ -201,33 +220,61 @@ pub async fn create_note_file(directory: String, title: String) -> Result<Note, 
 }
 
 #[tauri::command]
-pub async fn save_note_to_file(path: String, content: String, title: String) -> Result<(), String> {
-    // Read existing file to preserve frontmatter if possible, or just overwrite with basic structure
+pub async fn save_note_to_file(
+    path: String,
+    content: String,
+    title: String,
+    color: Option<String>,
+    watcher: tauri::State<'_, crate::watcher::WatcherState>,
+) -> Result<(), String> {
+    // Mark this as a self-write so the filesystem watcher ignores the event.
+    watcher.mark_self_write(&path);
+
+    // Non-lossy save: preserve `created`/`tags` from the existing file and keep
+    // its `color` unless a new one is passed. Metadata the app has no UI for but
+    // the external MCP relies on is never wiped. Logic lives in `notes-core`
+    // (unit-tested); see rebuild_preserving.
     let now = chrono::Utc::now().to_rfc3339();
-
-    // We recreate the note object just for saving
-    let note = Note {
-        id: String::new(), // Not needed for save
-        title,
-        content,
-        path: Some(path.clone()),
-        created_at: now.clone(), // This might be wrong if we don't have original, but usually enough for simple save
-        updated_at: now,
-        tags: vec![],
-        color: None,
-    };
-
-    let markdown = create_markdown(&note);
+    let existing = fs::read_to_string(&path).ok();
+    let markdown = notes_core::rebuild_preserving(existing.as_deref(), &title, &content, color, &now);
     fs::write(&path, markdown).map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn delete_note_file(path: String) -> Result<(), String> {
+pub async fn delete_note_file(
+    path: String,
+    watcher: tauri::State<'_, crate::watcher::WatcherState>,
+) -> Result<(), String> {
+    watcher.mark_self_write(&path);
     let p = Path::new(&path);
     if p.exists() {
         fs::remove_file(p).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// --- Search ---
+// The pure search logic lives in the `notes-core` crate (so it can be unit
+// tested without the GUI stack). These commands are just the Tauri entry points.
+pub use notes_core::{FileSearchHit, SearchHit};
+
+#[tauri::command]
+pub async fn search_notes(directory: String, query: String) -> Result<Vec<SearchHit>, String> {
+    let path = Path::new(&directory);
+    if !path.exists() {
+        return Err(format!("Directory does not exist: {}", directory));
+    }
+    Ok(notes_core::search_notes_in_dir(path, &query))
+}
+
+/// "Super search" over the files tab: filename + file content, recursively.
+#[tauri::command]
+pub async fn search_files(directory: String, query: String) -> Result<Vec<FileSearchHit>, String> {
+    let path = Path::new(&directory);
+    if !path.exists() {
+        return Err(format!("Directory does not exist: {}", directory));
+    }
+    Ok(notes_core::search_files_in_tree(path, &query))
 }

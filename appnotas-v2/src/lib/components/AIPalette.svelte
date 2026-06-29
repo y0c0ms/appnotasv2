@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { geminiService, type AIContent } from '../services/geminiService';
+    import { type AIContent } from '../services/geminiService';
+    import { aiService } from '../services/aiService';
     import { fade, scale } from 'svelte/transition';
     import { currentEditor } from '../stores/editorStore';
     import { get } from 'svelte/store';
@@ -117,7 +118,7 @@
                 console.log('[AIPalette] Processing background generation. PROMPT:', activePrompt.substring(0, 50) + '...');
                 console.log('[AIPalette] CM Editor present:', !!cmEditor, 'CM Select:', !!cmSelect);
             }
-            const response = await geminiService.generateResponse(activePrompt, activeContext);
+            const response = await aiService.generateResponse(activePrompt, activeContext);
             console.log(`[AIPalette] Response received, length: ${response.length}`);
 
             if (!response.trim()) {

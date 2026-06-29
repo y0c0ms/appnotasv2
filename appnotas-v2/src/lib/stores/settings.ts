@@ -40,6 +40,8 @@ const DEFAULT_SETTINGS: AppSettings = {
         'switchTabs': 'Ctrl+Tab',
         'focusLeft': 'Ctrl+Shift+ArrowLeft',
         'focusRight': 'Ctrl+Shift+ArrowRight',
+        'focusPrev': 'Shift+F6',
+        'focusNext': 'F6',
         'zoomIn': 'Ctrl+=',
         'zoomOut': 'Ctrl+-',
         'aiTrigger': 'Ctrl+Shift+Enter',
@@ -92,6 +94,9 @@ function createSettingsStore() {
                         set({
                             ...DEFAULT_SETTINGS,
                             ...loaded,
+                            // Merge keybinds individually so saved settings from older
+                            // versions still pick up newly added default shortcuts
+                            keybinds: { ...DEFAULT_SETTINGS.keybinds, ...(loaded.keybinds ?? {}) },
                             autostart: await isEnabled().catch(() => false)
                         });
                         console.log('✅ Settings loaded from disk');

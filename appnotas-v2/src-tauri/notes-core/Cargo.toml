@@ -1,0 +1,11 @@
+[package]
+name = "notes-core"
+version = "0.1.0"
+edition = "2021"
+
+# Pure, dependency-light note logic (search). Deliberately has NO Tauri / GUI
+# dependency so its tests link only std + serde and run reliably under any
+# toolchain — unlike the app crate, whose test harness pulls in WebView2.
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }

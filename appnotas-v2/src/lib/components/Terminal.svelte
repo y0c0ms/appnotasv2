@@ -8,7 +8,7 @@
     import { FitAddon } from '@xterm/addon-fit';
     import { spawn } from 'tauri-pty';
     import { invoke } from '@tauri-apps/api/core';
-    import { Plus, X, Terminal as TerminalIcon, ChevronDown, Trash2, Columns2 } from 'lucide-svelte';
+    import { Plus, X, Terminal as TerminalIcon, Columns2 } from 'lucide-svelte';
     import 'xterm/css/xterm.css';
 
     interface Props {
@@ -32,6 +32,7 @@
         fitAddon: FitAddon;
         pty: any;
         shell: ShellOption;
+        groupId: string | null; // sessions split together share a groupId
     }
 
     let sessions = $state<TerminalSession[]>([]);
@@ -48,11 +49,33 @@
     let resizeObserver: ResizeObserver | null = null;
 
     let showShellMenu = $state(false);
+    // When set, the next shell picked from the menu splits beside this terminal
+    // (instead of opening a standalone new terminal).
+    let splitSourceId = $state<string | null>(null);
     let availableShells = $state<ShellOption[]>([]);
     let defaultShell = $state<ShellOption | null>(null);
 
     // Computed active session
     let currentSession = $derived(sessions.find(s => s.id === activeSessionId));
+
+    // Split panes form a persistent group (shared groupId) so the grouping in
+    // the tab bar survives opening other terminals. Cluster tabs by group,
+    // preserving order; a group of 2+ renders inside one box.
+    let tabClusters = $derived.by(() => {
+        const clusters: { groupId: string | null; sessions: TerminalSession[] }[] = [];
+        const indexByGroup = new Map<string, number>();
+        for (const s of sessions) {
+            if (s.groupId && indexByGroup.has(s.groupId)) {
+                clusters[indexByGroup.get(s.groupId)!].sessions.push(s);
+            } else if (s.groupId) {
+                indexByGroup.set(s.groupId, clusters.length);
+                clusters.push({ groupId: s.groupId, sessions: [s] });
+            } else {
+                clusters.push({ groupId: null, sessions: [s] });
+            }
+        }
+        return clusters;
+    });
 
     $effect(() => {
         if ($terminalCommandBus && currentSession && currentSession.pty) {
@@ -64,47 +87,29 @@
 
     // Detect available shells on the system
     async function detectShells() {
-        const isWindows = navigator.platform.includes('Win');
-        const shells: ShellOption[] = [];
+        // Shell detection lives in Rust (`detect_shells`) so it's correct and
+        // OS-agnostic: it finds installed shells via PATH/known locations and
+        // only lists WSL when a distro is actually registered.
+        let shells: ShellOption[] = [];
+        try {
+            shells = await invoke<ShellOption[]>('detect_shells');
+        } catch (e) {
+            console.error('Failed to detect shells:', e);
+        }
 
-        if (isWindows) {
-            shells.push({ id: 'powershell', name: 'PowerShell', command: 'powershell.exe', available: true });
-            shells.push({ id: 'cmd', name: 'Command Prompt', command: 'cmd.exe', available: true });
-
-            try {
-                const gitBashPaths = [
-                    'C:\\Program Files\\Git\\bin\\bash.exe',
-                    'C:\\Program Files (x86)\\Git\\bin\\bash.exe'
-                ];
-                for (const path of gitBashPaths) {
-                    try {
-                        const exists = await invoke<boolean>('plugin:fs|exists', { path });
-                        if (exists) {
-                            shells.push({ id: 'gitbash', name: 'Git Bash', command: path, available: true });
-                            break;
-                        }
-                    } catch (e) {
-                        // ignore error
-                    }
-                }
-            } catch (e) {}
-
-            try {
-                shells.push({ id: 'wsl', name: 'WSL (Ubuntu)', command: 'wsl.exe', available: true });
-            } catch (e) {}
-        } else {
-            shells.push({ id: 'bash', name: 'Bash', command: '/bin/bash', available: true });
-            shells.push({ id: 'zsh', name: 'Zsh', command: '/bin/zsh', available: true });
+        if (shells.length === 0) {
+            // Fallback so a terminal can still open if detection fails.
+            const isWindows = navigator.platform.includes('Win');
+            shells = [{ id: 'default', name: 'Shell', command: isWindows ? 'powershell.exe' : '/bin/bash', available: true }];
         }
 
         availableShells = shells;
-        
+
         const defaultShellId = get(settingsStore).defaultShell;
-        const preferredShell = shells.find(s => s.id === defaultShellId);
-        defaultShell = preferredShell || shells[0];
+        defaultShell = shells.find(s => s.id === defaultShellId) || shells[0];
     }
 
-    async function spawnNewSession(shellToUse?: ShellOption) {
+    async function spawnNewSession(shellToUse?: ShellOption, splitWith: string | null = null) {
         const shell = shellToUse || defaultShell;
         if (!shell) return;
         
@@ -137,22 +142,39 @@
 
         // Add to state temporarily without PTY to ensure rendering happens
         const initialSessionName = `${shell.name} ${sessionCount}`;
+
+        // Determine the split group: splitting joins (or creates) the source's
+        // group; a plain new terminal is standalone (groupId null).
+        let groupId: string | null = null;
+        if (splitWith) {
+            const src = sessions.find(s => s.id === splitWith);
+            groupId = src?.groupId ?? `grp-${sessionId}`;
+        }
+
         const newSession: TerminalSession = {
             id: sessionId,
             name: initialSessionName,
             term,
             fitAddon,
             pty: null,
-            shell
+            shell,
+            groupId
         };
-        
-        sessions = [...sessions, newSession];
+
+        // Append the new session; if splitting, tag the source into the group.
+        sessions = [
+            ...sessions.map(s => (splitWith && s.id === splitWith && !s.groupId) ? { ...s, groupId } : s),
+            newSession
+        ];
         activeSessionId = sessionId;
         highlightedSessionId = sessionId;
-        if (visibleSessionIds.length <= 1) {
-            visibleSessionIds = [sessionId];
+
+        if (groupId) {
+            // Show every pane in this group side by side.
+            visibleSessionIds = sessions.filter(s => s.groupId === groupId).map(s => s.id);
         } else {
-            visibleSessionIds = [...visibleSessionIds, sessionId];
+            // A standalone new terminal becomes the sole visible pane.
+            visibleSessionIds = [sessionId];
         }
 
         // Custom key handler to allow app-wide focus shortcuts to bubble up
@@ -206,17 +228,30 @@
         session.pty?.kill();
         session.term.dispose();
 
+        const gid = session.groupId;
+
         // Update list
         sessions = sessions.filter(s => s.id !== id);
         visibleSessionIds = visibleSessionIds.filter(vid => vid !== id);
 
-        // Handle Active fallback
+        // A split group with a single survivor is no longer a split — dissolve it.
+        if (gid) {
+            const members = sessions.filter(s => s.groupId === gid);
+            if (members.length === 1) {
+                sessions = sessions.map(s => s.id === members[0].id ? { ...s, groupId: null } : s);
+            }
+        }
+
+        // Pick a new active terminal if we closed the active one (or emptied the view).
         if (activeSessionId === id || visibleSessionIds.length === 0) {
-            if (sessions.length > 0) {
-                activeSessionId = sessions[sessionIndex - 1]?.id || sessions[0]?.id;
-                if (visibleSessionIds.length === 0) visibleSessionIds = [activeSessionId!];
+            const fallback = sessions[sessionIndex - 1]?.id || sessions[0]?.id || null;
+            activeSessionId = fallback;
+            if (fallback) {
+                const s = sessions.find(x => x.id === fallback);
+                visibleSessionIds = s?.groupId
+                    ? sessions.filter(x => x.groupId === s.groupId).map(x => x.id)
+                    : [fallback];
             } else {
-                activeSessionId = null;
                 visibleSessionIds = [];
             }
         }
@@ -224,14 +259,12 @@
 
     function switchToSession(id: string, forceFocus: boolean = true) {
         activeSessionId = id;
-        if (visibleSessionIds.length <= 1) {
-            visibleSessionIds = [id];
-        } else if (!visibleSessionIds.includes(id)) {
-            // Keep existing splits but replace the first one if it's too many?
-            // Actually, usually switching just changes the "active" one.
-            // If in split mode, we stay in split mode.
-        }
-        
+        // Show the clicked terminal's whole split group, or just it if standalone.
+        const s = sessions.find(x => x.id === id);
+        visibleSessionIds = s?.groupId
+            ? sessions.filter(x => x.groupId === s.groupId).map(x => x.id)
+            : [id];
+
         tick().then(() => {
             currentSession?.fitAddon?.fit();
             if (forceFocus) {
@@ -241,26 +274,19 @@
         });
     }
 
-    function splitTerminal(id: string) {
-        const session = sessions.find(s => s.id === id);
-        if (!session) return;
-        
-        spawnNewSession(session.shell);
-    }
-
-    function toggleSplitMode() {
-        if (visibleSessionIds.length > 1) {
-            // Unsplit - keep only active
-            if (activeSessionId) visibleSessionIds = [activeSessionId];
-        } else {
-            // Split - find another one or create one
-            if (activeSessionId) splitTerminal(activeSessionId);
-        }
+    // Open the shell picker to split a terminal: the chosen shell spawns a new
+    // pane beside `id` (instead of silently cloning the same shell).
+    function openSplitMenu(id: string | null) {
+        if (!id) return;
+        splitSourceId = id;
+        showShellMenu = true;
     }
 
     function selectShell(shell: ShellOption) {
+        const splitWith = splitSourceId;
         showShellMenu = false;
-        spawnNewSession(shell);
+        splitSourceId = null;
+        spawnNewSession(shell, splitWith);
     }
 
     function handleResize() {
@@ -269,7 +295,9 @@
         }
     }
 
-    function toggleShellMenu() {
+    // Open the shell picker to create a standalone new terminal.
+    function openNewTerminalMenu() {
+        splitSourceId = null;
         showShellMenu = !showShellMenu;
     }
 
@@ -384,27 +412,32 @@
     $effect(() => {
         if ($focusArea === 'terminal-tabs' && sidebarEl) {
             tick().then(() => {
-                sidebarEl?.focus();
+                // contains() so focus on a child session tab isn't stolen
+                if (sidebarEl && !sidebarEl.contains(document.activeElement)) {
+                    sidebarEl.focus();
+                }
             });
         }
     });
 
-    // Handle Sidebar Keyboard Navigation
-    function handleSidebarKeyDown(e: KeyboardEvent) {
+    // Handle Tab Bar Keyboard Navigation (horizontal)
+    function handleTabbarKeyDown(e: KeyboardEvent) {
         if ($focusArea !== 'terminal-tabs') return;
 
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const goNext = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+        const goPrev = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+        if (goNext || goPrev) {
             e.preventDefault();
             const index = sessions.findIndex(s => s.id === (highlightedSessionId || activeSessionId));
             if (index === -1) {
                 if (sessions.length > 0) highlightedSessionId = sessions[0].id;
                 return;
             }
-            
-            let nextIndex = index;
-            if (e.key === 'ArrowDown') nextIndex = (index + 1) % sessions.length;
-            else nextIndex = (index - 1 + sessions.length) % sessions.length;
-            
+
+            const nextIndex = goNext
+                ? (index + 1) % sessions.length
+                : (index - 1 + sessions.length) % sessions.length;
+
             highlightedSessionId = sessions[nextIndex].id;
         } else if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -427,16 +460,97 @@
     class:sidebar-focused={$focusArea === 'terminal-tabs'}
     bind:this={wrapperEl}
 >
-    <!-- Left: Main Terminal View -->
+    {#snippet tab(session: TerminalSession)}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_interactive_supports_focus -->
+        <div
+            class="term-tab"
+            role="button"
+            tabindex="0"
+            class:active={activeSessionId === session.id}
+            class:highlighted={highlightedSessionId === session.id}
+            onclick={(e) => { e.stopPropagation(); highlightedSessionId = session.id; switchToSession(session.id); }}
+        >
+            <TerminalIcon size={13} color={activeSessionId === session.id ? '#4a9eff' : (highlightedSessionId === session.id ? '#66b2ff' : '#888')} />
+            <span class="tab-name">{session.name.toLowerCase()}</span>
+            <button class="split-btn" onclick={(e) => { e.stopPropagation(); openSplitMenu(session.id); }} title="Split — choose a shell">
+                <Columns2 size={15} />
+            </button>
+            <button class="kill-btn" onclick={(e) => { e.stopPropagation(); killSession(session.id); }} title="Close terminal">
+                <X size={15} />
+            </button>
+        </div>
+    {/snippet}
+
+    {#snippet shellMenuItems()}
+        <div class="shell-menu" style="right: 0;">
+            {#each availableShells as shell}
+                <button class="shell-option" onclick={(e) => { e.stopPropagation(); selectShell(shell); }}>
+                    <TerminalIcon size={14} class="option-icon" />
+                    <span class="option-name">{shell.name}</span>
+                </button>
+            {/each}
+        </div>
+    {/snippet}
+
+    {#snippet shellAdd()}
+        <div class="shell-selector">
+            <button class="add-button" onclick={(e) => { e.stopPropagation(); openNewTerminalMenu(); }} title="New terminal">
+                <Plus size={16} />
+            </button>
+            {#if showShellMenu}
+                {@render shellMenuItems()}
+            {/if}
+        </div>
+    {/snippet}
+
+    <!-- Main Terminal View (full width) -->
     <div class="terminal-main">
 
-        <div 
-            class="terminal-body-wrapper" 
+        <!-- Top tab bar: only shown with more than one session -->
+        {#if sessions.length > 1}
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <div
+                class="terminal-tabbar"
+                class:focused={$focusArea === 'terminal-tabs'}
+                data-focus-area="terminal-tabs"
+                tabindex="0"
+                role="navigation"
+                aria-label="Terminal sessions"
+                bind:this={sidebarEl}
+                onkeydown={handleTabbarKeyDown}
+                onclick={() => focusArea.set('terminal-tabs')}
+            >
+                <div class="tab-strip">
+                    {#each tabClusters as cluster (cluster.groupId ?? cluster.sessions[0].id)}
+                        {#if cluster.groupId && cluster.sessions.length > 1}
+                            <div class="tab-group" title="Split group">
+                                {#each cluster.sessions as session (session.id)}
+                                    {@render tab(session)}
+                                {/each}
+                            </div>
+                        {:else}
+                            {#each cluster.sessions as session (session.id)}
+                                {@render tab(session)}
+                            {/each}
+                        {/if}
+                    {/each}
+                </div>
+                <div class="tabbar-actions">
+                    {@render shellAdd()}
+                </div>
+            </div>
+        {/if}
+
+        <div
+            class="terminal-body-wrapper"
             class:split-mode={visibleSessionIds.length > 1}
-            bind:this={wrapperEl} 
-            onclick={() => focusArea.set('terminal')} 
-            role="button" 
-            tabindex="0" 
+            bind:this={wrapperEl}
+            onclick={() => focusArea.set('terminal')}
+            role="button"
+            data-focus-area="terminal"
+            tabindex="0"
             onkeydown={(e) => e.key === 'Enter' && focusArea.set('terminal')} 
             aria-label="Terminal Output"
         >
@@ -456,66 +570,16 @@
                    <p>No active terminal sessions</p>
                 </div>
             {/if}
-        </div>
-    </div>
 
-    <!-- Right: Terminal Sidebar (Tabs) -->
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <div 
-        class="terminal-sidebar" 
-        class:focused={$focusArea === 'terminal-tabs'}
-        tabindex="0"
-        role="navigation"
-        aria-label="Terminal sessions"
-        bind:this={sidebarEl}
-        onkeydown={handleSidebarKeyDown}
-        onclick={() => focusArea.set('terminal-tabs')}
-    >
-        <div class="sidebar-header">
-            <h3>TERMINALS</h3>
-            <div class="shell-selector">
-                <button class="add-button" onclick={(e) => { e.stopPropagation(); toggleShellMenu(); }}>
-                    <Plus size={14} />
-                </button>
-                {#if showShellMenu}
-                    <div class="shell-menu" style="right: 0;">
-                        {#each availableShells as shell}
-                            <button class="shell-option" onclick={(e) => { e.stopPropagation(); selectShell(shell); }}>
-                                <TerminalIcon size={14} class="option-icon" />
-                                <span class="option-name">{shell.name}</span>
-                            </button>
-                        {/each}
-                    </div>
-                {/if}
-            </div>
-        </div>
-        <div class="session-list">
-            {#each sessions as session}
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_interactive_supports_focus -->
-                <div 
-                    class="session-tab" 
-                    role="button"
-                    tabindex="0"
-                    class:active={activeSessionId === session.id} 
-                    class:highlighted={highlightedSessionId === session.id}
-                    onclick={(e) => { 
-                        e.stopPropagation(); 
-                        highlightedSessionId = session.id;
-                        switchToSession(session.id); 
-                    }}
-                >
-                    <TerminalIcon size={14} color={activeSessionId === session.id ? '#4a9eff' : (highlightedSessionId === session.id ? '#66b2ff' : '#888')} />
-                    <span class="tab-name">{session.name.toLowerCase()}</span>
-                    <button class="split-btn" onclick={(e) => { e.stopPropagation(); splitTerminal(session.id); }} title="Split Terminal">
-                        <Columns2 size={12} />
+            <!-- Floating controls when at most one session (tab bar is hidden) -->
+            {#if sessions.length <= 1}
+                <div class="floating-controls" aria-label="Terminal controls">
+                    <button class="add-button" onclick={(e) => { e.stopPropagation(); openSplitMenu(activeSessionId); }} title="Split — choose a shell">
+                        <Columns2 size={16} />
                     </button>
-                    <button class="kill-btn" onclick={(e) => { e.stopPropagation(); killSession(session.id); }} title="Kill Terminal">
-                        <Trash2 size={12} />
-                    </button>
+                    {@render shellAdd()}
                 </div>
-            {/each}
+            {/if}
         </div>
     </div>
 </div>
@@ -543,9 +607,9 @@
         border-top-color: rgba(255, 255, 255, 0.1);
     }
 
-    .terminal-sidebar.focused {
+    .terminal-tabbar.focused {
         background: rgba(74, 158, 255, 0.05);
-        box-shadow: inset 2px 0 0 #4a9eff;
+        box-shadow: inset 0 2px 0 #4a9eff;
     }
 
     .terminal-layout.hidden {
@@ -616,11 +680,11 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 28px;
+        height: 28px;
         background: transparent;
         border: none;
-        border-radius: 4px;
+        border-radius: 6px;
         color: #aaa;
         cursor: pointer;
         transition: all 0.15s;
@@ -668,78 +732,119 @@
         color: #4a9eff;
     }
 
-    /* SIDEBAR TABS */
-    .terminal-sidebar {
-        width: 180px;
+    /* TOP TAB BAR */
+    .terminal-tabbar {
         display: flex;
-        flex-direction: column;
+        align-items: center;
+        height: 34px;
+        flex-shrink: 0;
         background: #09090b;
-        border-left: 1px solid rgba(255, 255, 255, 0.05);
-        overflow-y: auto;
-    }
-
-    .sidebar-header {
-        padding: 0.5rem 0.8rem;
-        height: 38px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    
-    .sidebar-header h3 {
-        font-size: 0.65rem;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        color: #666;
-        margin: 0;
+        padding: 0 0.3rem;
+        gap: 0.3rem;
+        outline: none;
     }
 
-    .session-list {
-        display: flex;
-        flex-direction: column;
-        padding: 0.3rem;
-        gap: 2px;
-    }
-
-    .session-tab {
+    .tab-strip {
+        flex: 1;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 0.5rem;
-        padding: 0.4rem 0.6rem;
+        gap: 2px;
+        height: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+
+    .tab-strip::-webkit-scrollbar { height: 4px; }
+    .tab-strip::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 2px; }
+
+    /* Grouped tabs for a split view — reads as one unit. */
+    .tab-group {
+        display: flex;
+        align-items: center;
+        gap: 1px;
+        flex-shrink: 0;
+        padding: 2px;
+        border-radius: 8px;
+        background: rgba(74, 158, 255, 0.08);
+        box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.35);
+    }
+
+    .tab-group .term-tab {
+        border-radius: 5px;
+    }
+
+    .term-tab {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        flex-shrink: 0;
+        max-width: 200px;
+        height: 30px;
+        padding: 0 0.3rem 0 0.6rem;
         background: transparent;
         border: none;
-        border-radius: 4px;
+        border-radius: 6px;
         cursor: pointer;
         transition: all 0.1s;
-        text-align: left;
     }
 
-    .session-tab:hover {
+    .term-tab:hover {
         background: rgba(255, 255, 255, 0.05);
     }
 
-    .session-tab.active {
-        background: rgba(74, 158, 255, 0.1);
+    .term-tab.active {
+        background: rgba(74, 158, 255, 0.12);
     }
 
-    .session-tab.highlighted {
+    .term-tab.highlighted {
         background: rgba(255, 255, 255, 0.05);
-        box-shadow: inset 2px 0 0 rgba(74, 158, 255, 0.5);
+        box-shadow: inset 0 -2px 0 rgba(74, 158, 255, 0.6);
     }
 
     .tab-name {
-        flex: 1;
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         color: #bbb;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
-    .session-tab.active .tab-name {
+    .term-tab.active .tab-name {
         color: #fff;
+    }
+
+    .tabbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        flex-shrink: 0;
+        padding-left: 0.3rem;
+        border-left: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    /* Floating controls shown in single-session mode (tab bar hidden) */
+    .floating-controls {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 2px;
+        background: rgba(20, 20, 24, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 6px;
+        backdrop-filter: blur(4px);
+        opacity: 0.35;
+        transition: opacity 0.15s;
+        z-index: 20;
+    }
+
+    .terminal-body-wrapper:hover .floating-controls,
+    .floating-controls:hover {
+        opacity: 1;
     }
 
     .kill-btn,
@@ -747,29 +852,32 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 18px;
-        height: 18px;
+        width: 24px;
+        height: 24px;
         background: transparent;
         border: none;
-        border-radius: 4px;
-        color: #666;
+        border-radius: 5px;
+        color: #888;
         cursor: pointer;
-        opacity: 0;
+        opacity: 0.45;
         transition: all 0.15s;
+        flex-shrink: 0;
     }
 
-    .session-tab:hover .kill-btn,
-    .session-tab:hover .split-btn {
+    .term-tab:hover .kill-btn,
+    .term-tab.active .kill-btn,
+    .term-tab:hover .split-btn,
+    .term-tab.active .split-btn {
         opacity: 1;
     }
 
-    .kill-btn:hover,
     .split-btn:hover {
         background: rgba(255, 255, 255, 0.1);
         color: #fff;
     }
 
     .kill-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
         color: #ff5c5c;
     }
 </style>

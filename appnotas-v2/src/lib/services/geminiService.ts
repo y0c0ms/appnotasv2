@@ -1,13 +1,16 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import type { Part } from "@google/generative-ai";
 import { get } from "svelte/store";
 import { settingsStore } from "../stores/settings";
+import { rustFetch } from "./aiHttp";
 
 // --- Connectivity Fix for Corporate/Restricted Environments ---
-// We use the Tauri HTTP plugin's fetch to bypass CORS and organizational proxies.
-// This handles requests in the Rust backend instead of the browser frontend.
-const fetch = tauriFetch as any;
+// All requests go through the Rust `ai_http` transport (via rustFetch), whose
+// TLS validates against the OS certificate store. This trusts corporate
+// TLS-inspecting proxies like Zscaler (whose root CA IT installs into the
+// Windows store) instead of failing on the intercepted certificate.
+const fetch = rustFetch as any;
+const tauriFetch = rustFetch;
 
 export type AIModel = string;
 
@@ -26,8 +29,10 @@ class GeminiService {
             console.error("[GeminiService] No API Key found in settings!");
             throw new Error("Gemini API Key not found in settings.");
         }
-        console.log("[GeminiService] Initializing Gemini client with configured API key.");
-        this.genAI = new GoogleGenerativeAI(apiKey);
+        console.log("[GeminiService] Initializing Gemini client with configured API key and customFetch.");
+        this.genAI = new (GoogleGenerativeAI as any)(apiKey, {
+            customFetch: tauriFetch as any
+        });
     }
 
     async generateResponse(

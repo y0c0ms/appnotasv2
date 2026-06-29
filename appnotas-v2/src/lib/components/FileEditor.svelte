@@ -131,6 +131,9 @@
 	// Auto-focus editor when focusArea switches to 'editor'
     $effect(() => {
         if ($focusArea === 'editor') {
+            // If DOM focus is already inside the editor region, don't yank it
+            const active = document.activeElement;
+            if (active && active.closest('[data-focus-area="editor"]')) return;
             if (isCodeFile && codeMirrorEditor) {
                 codeMirrorEditor.focus();
             } else if (!isCodeFile && tiptapEditor) {
@@ -207,13 +210,14 @@
 
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div 
-		class="file-editor" 
+	<div
+		class="file-editor"
 		class:focused={$focusArea === 'editor'}
 		onclick={() => focusArea.set('editor')}
 		onkeydown={() => focusArea.set('editor')}
 		role="region"
 		aria-label="File Editor"
+		data-focus-area="editor"
 		tabindex="0"
 	>
 	<div class="editor-container" style="font-size: {$settingsStore.zoomLevel}rem; line-height: 1.6; {backgroundStyle}">

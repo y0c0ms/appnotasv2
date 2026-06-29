@@ -11,6 +11,18 @@ A modern, high-performance note-taking application built with **Svelte** and **T
 - ✏️ **Drawing Nodes**: Integrated canvas for quick sketches and diagrams.
 - 🤖 **AI Support**: Seamlessly integrate with Google Gemini for text generation and improvement.
 - 📁 **File-First**: Your notes are saved as human-readable `.md` files on your local machine.
+- 🔄 **External-edit aware**: A filesystem watcher refreshes the app when the notes folder is changed by another tool (e.g. a local MCP server or OneDrive sync) — see below.
+
+## 🔌 External editors / MCP integration
+
+The notes folder is a plain directory of Markdown files, so other tools can read and write it directly while AppNotas is running. AppNotas watches the notes directory (and its `tasks/` subfolder) and **auto-refreshes** when files are added, edited, or removed externally — no manual reload needed.
+
+Details and guarantees:
+
+- **Debounced watcher** (~400ms) on the notes directory, recursive. It ignores `.trash/` and other dot-folders, the app's own temp files, non-`.md` files, and OneDrive conflict copies, and suppresses the events from the app's own saves (no feedback loop).
+- **In-place refresh:** if a note that's currently open changes on disk and you have **no unsaved edits**, the editor reloads it from disk. If you *do* have unsaved edits, your edits are kept (your next save wins) — the app won't silently discard your work.
+- **Non-lossy saves:** when the app saves a note it **preserves `created`, `tags`, and `color`** already in the file's frontmatter (only `modified`, title, body, and an explicitly-changed color are updated). This means metadata set by an external tool is never wiped by an in-app edit.
+- **Format contract (kept stable for external tools):** frontmatter starts at byte 0 with `---`, UTF-8 with **no BOM**, keys `title` / `created` / `modified` / `tags: [..]` / optional `color`, body after the closing `---`. Task notes live in the flat `tasks/` subfolder; tasks are checkbox lines `- [ ] text` / `- [x] text` with line-index identity (toggling one line does not reflow the others). `.trash/` is excluded from all listing and search.
 
 ## 📥 Downloads
 

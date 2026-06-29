@@ -11,12 +11,9 @@
     let searchInput = $state<HTMLInputElement>();
 
     let sortedNotes = $derived([...$filteredTaskNotes].sort((a, b) => {
-        // Pinned to overlay should come first in the UI too for consistency?
-        // Actually NotesList uses 'pinnedNoteIds' which is different. 
-        // For TaskList, 'selectedTaskFileId' is the "pin to overlay" one.
         if (a.id === $selectedTaskFileId) return -1;
         if (b.id === $selectedTaskFileId) return 1;
-        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        return b.updated_at.localeCompare(a.updated_at);
     }));
 
     $effect(() => {
@@ -41,7 +38,8 @@
     $effect(() => {
         if ($activeTab === 'tasks' && $focusArea === 'list' && listContainer) {
             tick().then(() => {
-                if (listContainer && document.activeElement !== listContainer && document.activeElement !== searchInput) {
+                // contains() so focus on a child task item isn't stolen by the container
+                if (listContainer && !listContainer.contains(document.activeElement) && document.activeElement !== searchInput) {
                     listContainer.focus({ preventScroll: true });
                 }
             });
@@ -94,7 +92,7 @@
     }
 
     function countActiveTasks(content: string) {
-        if (!content) return 0;
+        if (!content || !content.includes('[ ]')) return 0;
         const lines = content.split('\n');
         return lines.filter(line => {
             return line.match(/^(\s*)[-*]\s*\[\s* \s*\]\s*(.*)/) || 
@@ -108,10 +106,11 @@
         <div class="search-icon-wrapper">
             <Search size={14} color="#888" />
         </div>
-        <input 
-            type="text" 
+        <input
+            type="text"
             class:focused={$focusArea === 'note-search'}
-            placeholder="Search tasks..." 
+            placeholder="Search tasks..."
+            data-focus-area="note-search"
             bind:value={$taskSearchQuery}
             bind:this={searchInput}
             onfocus={() => focusArea.set('note-search')}
@@ -130,10 +129,11 @@
         />
     </div>
 
-    <div 
-        class="tasks-list" 
+    <div
+        class="tasks-list"
         class:focused={$focusArea === 'list'}
         onkeydown={handleKeyDown}
+        data-focus-area="list"
         tabindex="0"
         role="listbox"
         aria-label="Task Files List"
@@ -147,7 +147,7 @@
                 {/if}
             </div>
         {:else}
-            {#each sortedNotes as note, i}
+            {#each sortedNotes as note, i (note.id)}
                 <div class="task-item-wrapper">
                     <button 
                         class="task-item"

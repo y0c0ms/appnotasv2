@@ -22,11 +22,90 @@
 	let searchQuery = $state('');
 	let searchInput = $state<HTMLInputElement>();
 
-	// Filter entries based on search query
-	let filteredEntries = $derived(searchQuery 
-		? entries.filter(e => e.name.toLowerCase().includes(searchQuery.toLowerCase()))
-		: entries
-    );
+	interface FileSearchHit {
+		path: string;
+		name: string;
+		is_dir: boolean;
+		name_match: boolean;
+		line_number: number | null;
+		snippet: string;
+		match_count: number;
+	}
+
+	interface DisplayItem {
+		name: string;
+		path: string;
+		is_dir: boolean;
+		detail: string;   // size (browse mode) or relative path (search mode)
+		snippet: string;  // matching line (content hits only)
+		line: number | null;
+	}
+
+	let searchResults = $state<FileSearchHit[]>([]);
+	let searching = $state(false);
+	let searchSeq = 0;
+
+	// Path shown under a result, relative to the current directory.
+	function relativeLabel(dir: string | null, full: string): string {
+		if (!dir) return full;
+		const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '');
+		const d = norm(dir);
+		const f = norm(full);
+		return f.startsWith(d + '/') ? f.slice(d.length + 1) : full;
+	}
+
+	// "Super search": filename + content, recursively, via Rust. Debounced.
+	// 1-char queries fall back to a fast local filename filter of the current dir.
+	$effect(() => {
+		const q = searchQuery.trim();
+		const dir = $currentDirectory;
+		if (q.length < 2 || !dir) {
+			searchResults = [];
+			searching = false;
+			return;
+		}
+		const seq = ++searchSeq;
+		searching = true;
+		const timer = setTimeout(async () => {
+			try {
+				const res = await invoke<FileSearchHit[]>('search_files', { directory: dir, query: q });
+				if (seq === searchSeq) searchResults = res;
+			} catch (e) {
+				if (seq === searchSeq) { searchResults = []; console.error('File search failed:', e); }
+			} finally {
+				if (seq === searchSeq) searching = false;
+			}
+		}, 200);
+		return () => clearTimeout(timer);
+	});
+
+	// Unified list the UI renders and the keyboard navigates.
+	let displayItems = $derived.by<DisplayItem[]>(() => {
+		const q = searchQuery.trim();
+		if (!q) {
+			return entries.map(e => ({
+				name: e.name, path: e.path, is_dir: e.is_dir,
+				detail: e.is_dir ? '' : formatSize(e.size), snippet: '', line: null
+			}));
+		}
+		if (q.length < 2) {
+			const lc = q.toLowerCase();
+			return entries.filter(e => e.name.toLowerCase().includes(lc)).map(e => ({
+				name: e.name, path: e.path, is_dir: e.is_dir,
+				detail: e.is_dir ? '' : formatSize(e.size), snippet: '', line: null
+			}));
+		}
+		return searchResults.map(h => ({
+			name: h.name, path: h.path, is_dir: h.is_dir,
+			detail: relativeLabel($currentDirectory, h.path),
+			snippet: h.snippet, line: h.line_number
+		}));
+	});
+
+	// Keep the selection in range as the displayed list changes.
+	$effect(() => {
+		if (selectedIndex >= displayItems.length) selectedIndex = Math.max(0, displayItems.length - 1);
+	});
 
 	// Auto-focus search input when focusArea switches to 'file-search'
     $effect(() => {
@@ -43,7 +122,8 @@
     $effect(() => {
         if ($focusArea === 'file-tree' && treeContainer) {
             tick().then(() => {
-                if (treeContainer && document.activeElement !== treeContainer) {
+                // contains() so focus on a child entry isn't stolen by the container
+                if (treeContainer && !treeContainer.contains(document.activeElement)) {
                     treeContainer.focus({ preventScroll: true });
                 }
             });
@@ -51,7 +131,7 @@
     });
 
     $effect(() => {
-        if (treeContainer && entries.length > 0) {
+        if (treeContainer && displayItems.length > 0) {
             scrollToSelected(selectedIndex);
         }
     });
@@ -87,12 +167,12 @@
 		}
 	}
 
-	async function handleClick(entry: FileEntry, index: number) {
+	async function handleClick(entry: { name: string; path: string; is_dir: boolean }, index: number) {
 		selectedIndex = index;
 		await openEntry(entry);
 	}
 
-	async function openEntry(entry: FileEntry) {
+	async function openEntry(entry: { name: string; path: string; is_dir: boolean }) {
 		if (entry.is_dir) {
 			console.log('Navigating to directory:', entry.path);
 			currentDirectory.set(entry.path);
@@ -160,17 +240,17 @@
 
 	function handleKeyDown(e: KeyboardEvent) {
 		if ($focusArea !== 'list') return;
-		if (entries.length === 0) return;
+		if (displayItems.length === 0) return;
 
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			selectedIndex = Math.min(selectedIndex + 1, entries.length - 1);
+			selectedIndex = Math.min(selectedIndex + 1, displayItems.length - 1);
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			selectedIndex = Math.max(selectedIndex - 1, 0);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
-			openEntry(entries[selectedIndex]);
+			openEntry(displayItems[selectedIndex]);
 		} else if (e.key === 'Backspace' && !e.ctrlKey) {
 			e.preventDefault();
 			// Go to parent directory
@@ -220,7 +300,8 @@
 		<input
 			type="text"
 			class:focused={$focusArea === 'file-search'}
-			placeholder="Filter files..."
+			placeholder="Search files & contents..."
+			data-focus-area="file-search"
 			bind:value={searchQuery}
 			bind:this={searchInput}
 			onfocus={() => focusArea.set('file-search')}
@@ -242,10 +323,11 @@
 		{/if}
 	</div>
 
-	<div 
-		class="file-list" 
+	<div
+		class="file-list"
 		class:focused={$focusArea === 'list'}
-		onkeydown={handleKeyDown} 
+		onkeydown={handleKeyDown}
+		data-focus-area="list"
 		tabindex="0"
 		role="listbox"
 		aria-label="File Explorer"
@@ -258,23 +340,24 @@
 				<div class="error-toast">{error}</div>
 			{/if}
 			<div class="entries">
-				{#each filteredEntries as entry, i}
+				{#each displayItems as item, i}
 					<button
 						class="entry"
-						class:directory={entry.is_dir}
+						class:directory={item.is_dir}
 						class:selected={i === selectedIndex}
-						onclick={() => handleClick(entry, i)}
+						class:has-snippet={!!item.snippet}
+						onclick={() => handleClick(item, i)}
 						onmouseenter={() => (selectedIndex = i)}
 					>
-						{#if entry.is_dir}
+						{#if item.is_dir}
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<span class="icon folder-icon-action" title="Open in Terminal" onclick={(e) => {
 								e.stopPropagation();
 								if ($terminalVisible) {
-									$terminalCommandBus = `cd "${entry.path}"\r`;
+									$terminalCommandBus = `cd "${item.path}"\r`;
 								} else {
-									openEntry(entry);
+									openEntry(item);
 								}
 							}}>
 								<Folder size={14} color="#888" />
@@ -284,14 +367,23 @@
 								<FileText size={14} color="#666" />
 							</span>
 						{/if}
-						<span class="name">{entry.name}</span>
-						{#if !entry.is_dir && entry.size}
-							<span class="size">{formatSize(entry.size)}</span>
-						{/if}
+						<span class="entry-text">
+							<span class="entry-row">
+								<span class="name">{item.name}</span>
+								{#if item.detail}
+									<span class="detail">{item.detail}{#if item.line}:{item.line}{/if}</span>
+								{/if}
+							</span>
+							{#if item.snippet}
+								<span class="snippet">{item.snippet}</span>
+							{/if}
+						</span>
 					</button>
 				{/each}
-				{#if filteredEntries.length === 0 && searchQuery}
-					<div class="no-results">No files match "{searchQuery}"</div>
+				{#if searching && displayItems.length === 0}
+					<div class="no-results">Searching…</div>
+				{:else if displayItems.length === 0 && searchQuery}
+					<div class="no-results">No files or contents match "{searchQuery}"</div>
 				{/if}
 			</div>
 		{/if}
@@ -483,16 +575,49 @@
 		cursor: pointer;
 	}
 
-	.name {
+	.entry-text {
 		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		overflow: hidden;
+	}
+
+	.entry-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
+	.entry.has-snippet {
+		align-items: flex-start;
+	}
+
+	.name {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.size {
-		font-size: 0.75rem;
+	.detail {
+		font-size: 0.7rem;
 		color: #666;
 		flex-shrink: 0;
+		margin-left: auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 55%;
+	}
+
+	.snippet {
+		font-size: 0.72rem;
+		color: #8a8a8a;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>

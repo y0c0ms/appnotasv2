@@ -11,7 +11,7 @@
     import OverlayCommandPalette from '$lib/components/OverlayCommandPalette.svelte';
     import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 
-    import { geminiService } from '$lib/services/geminiService';
+    import { aiService } from '$lib/services/aiService';
     import WindowControls from '$lib/components/WindowControls.svelte';
     import appLogo from '$lib/assets/nobg-icon.png';
 
@@ -235,7 +235,7 @@
         
         aiState = 'AI_LOADING';
         try {
-            const response = await geminiService.generateResponse(
+            const response = await aiService.generateResponse(
                 aiPrompt,
                 { text: contextText },
                 undefined,
@@ -399,7 +399,7 @@
                     <button class="file-item" class:active={!$selectedTaskFileId} onclick={() => selectTaskFile('')}>
                         Show All Tasks
                     </button>
-                    {#each $taskNotes as note}
+                    {#each $taskNotes as note (note.id)}
                         <button class="file-item" class:active={$selectedTaskFileId === note.id} onclick={() => selectTaskFile(note.id)}>
                             {note.title}
                         </button>
@@ -425,7 +425,7 @@
             {/if}
 
             <div class="task-list">
-                {#each activeTasks as task}
+                {#each activeTasks as task (task.taskId)}
                     <div class="task-item" class:editing={editingTaskId === task.taskId}>
                         <div class="checkbox-wrapper">
                             <input 
@@ -484,7 +484,7 @@
             {#if completedTasks.length > 0}
                 <div class="section-label mt-20">Completed</div>
                 <div class="task-list completed-list">
-                    {#each completedTasks as task}
+                    {#each completedTasks as task (task.taskId)}
                         <div class="task-item strikethrough-item">
                             <div class="checkbox-wrapper">
                                 <input 
@@ -538,7 +538,7 @@
                     </div>
                     
                     <div class="ai-task-list scrollbar-custom">
-                        {#each activeTasks as task}
+                        {#each activeTasks as task (task.taskId)}
                             <label class="ai-task-item" class:selected={aiSelectedTaskIds.has(task.taskId)}>
                                 <input 
                                     type="checkbox" 

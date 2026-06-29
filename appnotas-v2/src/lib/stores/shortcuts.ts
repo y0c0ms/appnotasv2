@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import { focusArea, nextFocusArea, prevFocusArea } from './focus';
+import { focusArea, nextFocusArea, prevFocusArea, type FocusArea } from './focus';
 import { openFiles, terminalVisible } from './files';
 import { settingsStore } from './settings';
 
@@ -47,6 +47,12 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
     const eventKey = e.key.toLowerCase();
     const bindKey = key.toLowerCase();
 
+    // A binding without Ctrl/Alt/Meta would hijack normal typing and navigation
+    // app-wide (this handler runs in capture phase on window) — e.g. a bare "Tab"
+    // recorded by mistake kills Tab everywhere. Only F-keys may bind unmodified.
+    const isFnKey = /^f([1-9]|1[0-2])$/.test(bindKey);
+    if (!needsCtrl && !needsAlt && !needsMeta && !isFnKey) return false;
+
     // Handle special key names
     if (bindKey === 'arrowleft') return eventKey === 'arrowleft';
     if (bindKey === 'arrowright') return eventKey === 'arrowright';
@@ -59,6 +65,88 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
     if (bindKey === 'space') return eventKey === ' ';
 
     return eventKey === bindKey;
+}
+
+function moveFocusPrev() {
+    const current = get(focusArea);
+    const tab = get(activeTab);
+    console.log('[Shortcuts] Focus left triggered, current:', current, 'tab:', tab);
+
+    if (current === 'settings') {
+        focusArea.update(() => 'editor');
+        return;
+    }
+
+    let next = prevFocusArea(current);
+
+    // Convert 'search' placeholder to actual search area based on tab
+    if (next === 'search' as any) {
+        next = tab === 'files' ? 'file-search' : 'note-search';
+    }
+
+    // Skip file-tabs if not on files tab or no files open
+    if (next === 'file-tabs') {
+        const files = get(openFiles);
+        if (tab !== 'files' || files.length === 0) {
+            next = prevFocusArea(next);
+        }
+    }
+
+    // Skip terminal and terminal-tabs if terminal is hidden
+    if (next === 'terminal' || next === 'terminal-tabs') {
+        if (!get(terminalVisible)) {
+            next = prevFocusArea(next);
+        }
+    }
+
+    // Final search check in case skipping landed us on 'search'
+    if (next === 'search' as any) {
+        next = tab === 'files' ? 'file-search' : 'note-search';
+    }
+
+    console.log('[Shortcuts] Focus changing to:', next);
+    focusArea.set(next);
+}
+
+function moveFocusNext() {
+    const current = get(focusArea);
+    const tab = get(activeTab);
+    console.log('[Shortcuts] Focus right triggered, current:', current, 'tab:', tab);
+
+    if (current === 'editor' && get(settingsOpen)) {
+        focusArea.set('settings');
+        return;
+    }
+
+    let next = nextFocusArea(current);
+
+    // Convert 'search' placeholder to actual search area based on tab
+    if (next === 'search' as any) {
+        next = tab === 'files' ? 'file-search' : 'note-search';
+    }
+
+    // Skip file-tabs if not on files tab or no files open
+    if (next === 'file-tabs') {
+        const files = get(openFiles);
+        if (tab !== 'files' || files.length === 0) {
+            next = nextFocusArea(next);
+        }
+    }
+
+    // Skip terminal and terminal-tabs if terminal is hidden
+    if (next === 'terminal' || next === 'terminal-tabs') {
+        if (!get(terminalVisible)) {
+            next = nextFocusArea(next);
+        }
+    }
+
+    // Final search check in case skipping landed us on 'search'
+    if (next === 'search' as any) {
+        next = tab === 'files' ? 'file-search' : 'note-search';
+    }
+
+    console.log('[Shortcuts] Focus changing to:', next);
+    focusArea.set(next);
 }
 
 export function setupGlobalShortcuts() {
@@ -143,93 +231,19 @@ export function setupGlobalShortcuts() {
             return;
         }
 
-        // Move focus area left
-        if (matchesKeybind(e, keybinds.focusLeft)) {
+        // Move focus area left (Ctrl+Shift+Left or Shift+F6)
+        if (matchesKeybind(e, keybinds.focusLeft) || matchesKeybind(e, keybinds.focusPrev)) {
             e.preventDefault();
             e.stopPropagation();
-            const current = get(focusArea);
-            const tab = get(activeTab);
-            console.log('[Shortcuts] Focus left triggered, current:', current, 'tab:', tab);
-
-            if (current === 'settings') {
-                focusArea.update(() => 'editor');
-                return;
-            }
-
-            let next = prevFocusArea(current);
-
-            // Convert 'search' placeholder to actual search area based on tab
-            if (next === 'search' as any) {
-                next = tab === 'files' ? 'file-search' : 'note-search';
-            }
-
-            // Skip file-tabs if not on files tab or no files open
-            if (next === 'file-tabs') {
-                const files = get(openFiles);
-                if (tab !== 'files' || files.length === 0) {
-                    next = prevFocusArea(next);
-                }
-            }
-
-            // Skip terminal and terminal-tabs if terminal is hidden
-            if (next === 'terminal' || next === 'terminal-tabs') {
-                if (!get(terminalVisible)) {
-                    next = prevFocusArea(next);
-                }
-            }
-
-            // Final search check in case skipping landed us on 'search'
-            if (next === 'search' as any) {
-                next = tab === 'files' ? 'file-search' : 'note-search';
-            }
-
-            console.log('[Shortcuts] Focus changing to:', next);
-            focusArea.set(next);
+            moveFocusPrev();
             return;
         }
 
-        // Move focus area right
-        if (matchesKeybind(e, keybinds.focusRight)) {
+        // Move focus area right (Ctrl+Shift+Right or F6)
+        if (matchesKeybind(e, keybinds.focusRight) || matchesKeybind(e, keybinds.focusNext)) {
             e.preventDefault();
             e.stopPropagation();
-            const current = get(focusArea);
-            const tab = get(activeTab);
-            console.log('[Shortcuts] Focus right triggered, current:', current, 'tab:', tab);
-
-            if (current === 'editor' && get(settingsOpen)) {
-                focusArea.set('settings');
-                return;
-            }
-
-            let next = nextFocusArea(current);
-
-            // Convert 'search' placeholder to actual search area based on tab
-            if (next === 'search' as any) {
-                next = tab === 'files' ? 'file-search' : 'note-search';
-            }
-
-            // Skip file-tabs if not on files tab or no files open
-            if (next === 'file-tabs') {
-                const files = get(openFiles);
-                if (tab !== 'files' || files.length === 0) {
-                    next = nextFocusArea(next);
-                }
-            }
-
-            // Skip terminal and terminal-tabs if terminal is hidden
-            if (next === 'terminal' || next === 'terminal-tabs') {
-                if (!get(terminalVisible)) {
-                    next = nextFocusArea(next);
-                }
-            }
-
-            // Final search check in case skipping landed us on 'search'
-            if (next === 'search' as any) {
-                next = tab === 'files' ? 'file-search' : 'note-search';
-            }
-
-            console.log('[Shortcuts] Focus changing to:', next);
-            focusArea.set(next);
+            moveFocusNext();
             return;
         }
 
@@ -288,6 +302,20 @@ export function setupGlobalShortcuts() {
             settingsOpen.set(false);
         }
     }, { capture: true }); // Capture phase to intercept before editors
+
+    // Keep the focusArea store in sync with real DOM focus, so Tab / clicks /
+    // programmatic .focus() all land in a region the keyboard handlers recognize.
+    // Regions declare themselves with data-focus-area on their container.
+    window.addEventListener('focusin', (e) => {
+        const target = e.target as Element | null;
+        const region = target?.closest?.('[data-focus-area]');
+        if (!region) return;
+        const area = region.getAttribute('data-focus-area') as FocusArea;
+        if (area && get(focusArea) !== area) {
+            console.log('[Shortcuts] DOM focus moved to area:', area);
+            focusArea.set(area);
+        }
+    });
 
     console.log('✅ Global shortcuts registered');
 }

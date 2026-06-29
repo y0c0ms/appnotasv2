@@ -77,7 +77,8 @@
 	$effect(() => {
         if ($focusArea === 'file-tabs' && tabsContainer) {
             tick().then(() => {
-                if (tabsContainer && document.activeElement !== tabsContainer) {
+                // contains() so focus on a child tab button isn't stolen
+                if (tabsContainer && !tabsContainer.contains(document.activeElement)) {
                     tabsContainer.focus();
                 }
             });
@@ -550,12 +551,13 @@
 				<div class="error">{error}</div>
 			{:else}
 				{#if $activeTab === 'files' && $openFiles.length > 0}
-					<div 
+					<div
 						role="tablist"
 						tabindex={0}
 						aria-label="Open files tabs"
-						class="content-tabs" 
+						class="content-tabs"
 						class:focused={$focusArea === 'file-tabs'}
+						data-focus-area="file-tabs"
 						onkeydown={handleToolbarKeyDown}
 						bind:this={tabsContainer}
 					>

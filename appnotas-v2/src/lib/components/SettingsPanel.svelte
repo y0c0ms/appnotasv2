@@ -6,6 +6,7 @@
     import { open as openDialog, save as saveDialog, message } from '@tauri-apps/plugin-dialog';
     import { fade, slide } from 'svelte/transition';
     import { geminiService } from '../services/geminiService';
+    import { claudeService, CLAUDE_MODELS } from '../services/claudeService';
     import { onMount, tick } from 'svelte';
     import { X, FolderOpen, Upload, Download, Bug, Trash2 } from 'lucide-svelte';
 	import { consoleStore } from '$lib/stores/consoleStore';
@@ -20,6 +21,8 @@
         'switchTabs': 'Switch Tabs',
         'focusLeft': 'Focus Left',
         'focusRight': 'Focus Right',
+        'focusPrev': 'Focus Previous Area',
+        'focusNext': 'Focus Next Area',
         'zoomIn': 'Zoom In',
         'zoomOut': 'Zoom Out',
         'aiTrigger': 'AI Trigger',
@@ -28,7 +31,10 @@
     };
 
     let recordingShortcut: string | null = null;
+    let recordingError = false;
     let availableModels: string[] = ['gemini-1.5-flash'];
+    let claudeModels: string[] = CLAUDE_MODELS;
+    let claudeAvailable = false;
     let isLoadingModels = false;
     let isTestingModel = false;
     let showConsole = false;
@@ -37,6 +43,7 @@
 
     onMount(() => {
         loadModels();
+        claudeService.isAvailable().then((ok) => { claudeAvailable = ok; });
     });
 
     async function loadModels() {
@@ -60,16 +67,26 @@
     }
 
     async function testConfiguration() {
-        const apiKey = $settingsStore.geminiKey;
         const model = $settingsStore.aiModelPreference;
-        
-        if (!apiKey) {
-            await message('Please enter an API Key first.', { title: 'Configuration Error', kind: 'error' });
-            return;
-        }
 
         isTestingModel = true;
         try {
+            if (model?.startsWith('claude')) {
+                // Claude path: round-trip a tiny request through the subscription.
+                const reply = await claudeService.generateResponse('Reply with the single word: ok', { text: '' }, model);
+                if (reply && reply.trim().length > 0) {
+                    await message(`Successfully connected to ${model} using your Claude subscription!`, { title: 'Configuration Verified', kind: 'info' });
+                } else {
+                    await message(`Connected to ${model} but got an empty reply. Check logs.`, { title: 'Verification Failed', kind: 'error' });
+                }
+                return;
+            }
+
+            // Gemini path requires an API key.
+            if (!$settingsStore.geminiKey) {
+                await message('Please enter a Gemini API Key first (or pick a Claude model).', { title: 'Configuration Error', kind: 'error' });
+                return;
+            }
             const success = await geminiService.validateModel(model);
             if (success) {
                 await message(`Successfully connected to ${model}!`, { title: 'Configuration Verified', kind: 'info' });
@@ -93,19 +110,36 @@
 
     function startRecording(key: string) {
         recordingShortcut = key;
+        recordingError = false;
     }
 
     function captureKey(e: KeyboardEvent, key: string) {
         // Ignore modifier-only presses
         if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
-        
+
         // Allow Escape to cancel
         if (e.key === 'Escape') {
             recordingShortcut = null;
+            recordingError = false;
             return;
         }
 
         e.preventDefault();
+
+        // Normalize key name
+        let keyName = e.key;
+        if (keyName === ' ') keyName = 'Space';
+        if (keyName.length === 1) keyName = keyName.toUpperCase();
+
+        // Shortcuts are intercepted globally in capture phase, so a binding
+        // without a real modifier (e.g. bare Tab or a letter) would swallow that
+        // key across the whole app. Only F-keys may bind unmodified.
+        const isFnKey = /^F([1-9]|1[0-2])$/.test(keyName);
+        if (!e.ctrlKey && !e.altKey && !e.metaKey && !isFnKey) {
+            recordingError = true;
+            return;
+        }
+        recordingError = false;
 
         // Build keybind string
         const parts: string[] = [];
@@ -113,12 +147,7 @@
         if (e.shiftKey) parts.push('Shift');
         if (e.altKey) parts.push('Alt');
         if (e.metaKey) parts.push('Meta');
-        
-        // Normalize key name
-        let keyName = e.key;
-        if (keyName === ' ') keyName = 'Space';
-        if (keyName.length === 1) keyName = keyName.toUpperCase();
-        
+
         parts.push(keyName);
         const newKeybind = parts.join('+');
         
@@ -221,7 +250,11 @@
     let panelElement: HTMLElement;
     
     $: if ($focusArea === 'settings' && panelElement) {
-        panelElement.focus();
+        // Don't steal focus from inputs inside the panel (focusin sync sets
+        // the area whenever any child gains focus)
+        if (!panelElement.contains(document.activeElement)) {
+            panelElement.focus();
+        }
     }
 
     let autoScrollConsole = true;
@@ -247,12 +280,13 @@
     }
 </script>
 
-<div 
-    class="settings-panel" 
+<div
+    class="settings-panel"
     transition:slide={{ axis: 'x', duration: 300 }}
     tabindex="0"
     role="dialog"
     aria-label="Settings"
+    data-focus-area="settings"
     bind:this={panelElement}
     on:focus={() => focusArea.set('settings')}
 >
@@ -339,6 +373,16 @@
         <section>
             <h3>AI Configuration</h3>
             <div class="setting-item column">
+                <span class="field-title">Claude Subscription</span>
+                <p class="hint" style="margin-top: 0.25rem;">
+                    {#if claudeAvailable}
+                        ✓ Using your local Claude Code login — pick a Claude model below. No API key needed.
+                    {:else}
+                        Not detected. Sign in once with Claude Code on this device to use your subscription here.
+                    {/if}
+                </p>
+            </div>
+            <div class="setting-item column" style="margin-top: 1rem;">
                 <label for="gemini-key">Gemini API Key</label>
                 <input 
                     id="gemini-key"
@@ -361,19 +405,26 @@
                         </button>
                     </div>
                 </div>
-                <select 
+                <select
                     id="model-pref"
-                    bind:value={$settingsStore.aiModelPreference} 
+                    bind:value={$settingsStore.aiModelPreference}
                     on:change={save}
                     class="text-input select-input"
                     disabled={isLoadingModels}
                 >
-                    {#if availableModels.length === 0}
-                         <option value="gemini-1.5-flash">Default (Gemini 1.5 Flash)</option>
-                    {/if}
-                    {#each availableModels as model}
-                        <option value={model}>{model}</option>
-                    {/each}
+                    <optgroup label={claudeAvailable ? 'Claude (your subscription)' : 'Claude (sign in via Claude Code)'}>
+                        {#each claudeModels as model}
+                            <option value={model}>{model}</option>
+                        {/each}
+                    </optgroup>
+                    <optgroup label="Gemini (API key)">
+                        {#if availableModels.length === 0}
+                             <option value="gemini-1.5-flash">Default (Gemini 1.5 Flash)</option>
+                        {/if}
+                        {#each availableModels as model}
+                            <option value={model}>{model}</option>
+                        {/each}
+                    </optgroup>
                 </select>
             </div>
             <div class="setting-item column" style="margin-top: 1rem;">
@@ -409,7 +460,7 @@
                             on:keydown|stopPropagation={(e) => recordingShortcut === key && captureKey(e, key)}
                         >
                             {#if recordingShortcut === key}
-                                <span class="recording-indicator">Press keys...</span>
+                                <span class="recording-indicator">{recordingError ? 'Add Ctrl/Alt or use an F-key' : 'Press keys...'}</span>
                             {:else}
                                 {$settingsStore.keybinds[key] || 'Not set'}
                             {/if}
@@ -574,6 +625,12 @@
         color: #666;
         margin: 0.25rem 0 0.5rem 0;
         line-height: 1.4;
+    }
+
+    .field-title {
+        display: block;
+        font-size: 0.85rem;
+        color: #ccc;
     }
 
     .text-input {

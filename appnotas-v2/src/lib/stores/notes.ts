@@ -47,6 +47,29 @@ export const taskSearchQuery = writable<string>('');
 // Active Note Content (fetched dynamically for non-task notes)
 export const activeNoteContent = writable<string>('');
 
+// Bumped (with the changed file paths) whenever the notes folder is modified
+// externally — by the local MCP server or OneDrive sync. Components watch this
+// to refresh. See the Rust `start_notes_watcher` / `notes-changed` event.
+export const externalChange = writable<{ seq: number; paths: string[] }>({ seq: 0, paths: [] });
+
+/** Re-list notes + task notes from disk, preserving the current selection. */
+export async function reloadFromDisk() {
+    const dir = get(notesDirectory);
+    if (!dir) return;
+    await loadNotes(dir);
+    await loadTaskNotes(dir);
+}
+
+/** (Re)start the Rust filesystem watcher on the notes directory. */
+async function startNotesWatcher(directory: string) {
+    if (!directory) return;
+    try {
+        await invoke('start_notes_watcher', { directory });
+    } catch (e) {
+        console.error('Failed to start notes watcher:', e);
+    }
+}
+
 // Sync activeNoteId and selectedTaskFileId to settings for persistence
 activeNoteId.subscribe(async (id: string | null) => {
     if (id) {
@@ -119,6 +142,7 @@ export async function initNotes() {
             notesDirectory.set(settings.notesDirectory);
             await loadNotes(settings.notesDirectory);
             await loadTaskNotes(settings.notesDirectory);
+            await startNotesWatcher(settings.notesDirectory);
         }
         if (settings.selectedTaskFileId) {
             selectedTaskFileId.set(settings.selectedTaskFileId);
@@ -159,6 +183,15 @@ export async function initNotes() {
         }
     });
 
+    // External changes (MCP server / OneDrive) reported by the Rust watcher.
+    listen('notes-changed', async (event) => {
+        const paths = (event.payload as string[]) ?? [];
+        console.log('🛰️ External notes change:', paths);
+        await reloadFromDisk();
+        // Signal components (e.g. the open editor) to reconcile.
+        externalChange.update(c => ({ seq: c.seq + 1, paths }));
+    });
+
     console.log('📡 Notes sync listener active');
 }
 
@@ -181,6 +214,7 @@ export async function setNotesDirectory(directory: string) {
         notesDirectory.set(directory);
         await loadNotes(directory);
         await loadTaskNotes(directory);
+        await startNotesWatcher(directory);
 
         // Notify other windows to refresh their directory/notes
         await emit('notes-updated', {});
@@ -296,7 +330,10 @@ export async function saveNoteToFile(id: string, content: string, newTitle?: str
         await invoke('save_note_to_file', {
             path: note.path,
             content,
-            title: titleToSave
+            title: titleToSave,
+            // Pass current color; Rust preserves created/tags from disk and uses
+            // this color (or keeps the on-disk one if null).
+            color: note.color ?? null
         });
 
         // Update local state in both lists
@@ -389,18 +426,61 @@ export async function deleteNoteFile(id: string) {
     }
 }
 
-// Derived: Get the filtered notes list
-export const filteredNotes = derived(
-    [notesList, searchQuery],
-    ([$notes, $query]) => {
-        if (!$query.trim()) return $notes;
+export interface SearchHit {
+    id: string;
+    title: string;
+    path: string;
+    snippet: string;
+    match_count: number;
+    title_match: boolean;
+}
 
-        const lowerQuery = $query.toLowerCase();
-        return $notes.filter(note =>
-            note.title.toLowerCase().includes(lowerQuery) ||
-            note.content.toLowerCase().includes(lowerQuery)
-        );
-    }
+// Derived: filtered notes list. Search runs in Rust (`search_notes`), which
+// scans the notes directory on disk — so it covers note *content* even though
+// the in-memory list is loaded without content. Debounced, with a title-only
+// fallback if the backend call fails.
+export const filteredNotes = derived<
+    [typeof notesList, typeof searchQuery, typeof notesDirectory],
+    Note[]
+>(
+    [notesList, searchQuery, notesDirectory],
+    ([$notes, $query, $dir], set) => {
+        const q = $query.trim();
+        if (!q) {
+            set($notes);
+            return;
+        }
+        if (!$dir) {
+            const lq = q.toLowerCase();
+            set($notes.filter(n => n.title.toLowerCase().includes(lq)));
+            return;
+        }
+
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            invoke<SearchHit[]>('search_notes', { directory: $dir, query: q })
+                .then(hits => {
+                    if (cancelled) return;
+                    const byId = new Map($notes.map(n => [n.id, n] as const));
+                    set(hits.map(h => byId.get(h.id)).filter((n): n is Note => !!n));
+                })
+                .catch(err => {
+                    if (cancelled) return;
+                    console.error('[notes] Rust search failed, falling back:', err);
+                    const lq = q.toLowerCase();
+                    set($notes.filter(n =>
+                        n.title.toLowerCase().includes(lq) ||
+                        n.content.toLowerCase().includes(lq)
+                    ));
+                });
+        }, 120);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    },
+    []
 );
 
 export const filteredTaskNotes = derived(
@@ -421,8 +501,7 @@ export const filteredTaskNotes = derived(
  * Returns the body content (without frontmatter) or null if the note has no path.
  */
 export async function reloadNoteFromDisk(id: string): Promise<string | null> {
-    const notes = get(notesList);
-    const note = notes.find(n => n.id === id);
+    const note = get(notesList).find(n => n.id === id) || get(taskNotesList).find(n => n.id === id);
     if (!note || !note.path) return null;
 
     try {
@@ -487,7 +566,11 @@ export const allTasks = derived(
             : allAvailableNotes;
 
         targetNotes.forEach(note => {
-            const lines = note.content.split('\n');
+            const content = note.content;
+            if (!content || (!content.includes('[ ]') && !content.includes('[x]') && !content.includes('[X]'))) {
+                return;
+            }
+            const lines = content.split('\n');
             lines.forEach((line, index) => {
                 const taskMatch = line.match(/^(\s*)[-*]\s*\[\s*([ xX])\s*\]\s*(.*)/);
                 if (taskMatch) {

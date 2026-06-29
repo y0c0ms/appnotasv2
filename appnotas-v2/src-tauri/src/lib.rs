@@ -1,4 +1,5 @@
 mod commands;
+mod watcher;
 
 use std::str::FromStr;
 use std::sync::Mutex;
@@ -18,7 +19,6 @@ struct AppShortcutConfig {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -96,6 +96,10 @@ pub fn run() {
                 overlay: Mutex::new(todo_shortcut),
             });
 
+            // State for the notes-directory filesystem watcher (started from JS
+            // once the configured notes directory is known).
+            app.manage(watcher::WatcherState::default());
+
             // --- Window Focus Sync ---
             // Hide overlay when main window is focused
             if let Some(main) = app.get_webview_window("main") {
@@ -117,12 +121,21 @@ pub fn run() {
             commands::notes::create_note_file,
             commands::notes::save_note_to_file,
             commands::notes::delete_note_file,
+            commands::notes::search_notes,
+            commands::notes::search_files,
+            commands::shells::detect_shells,
             // File operations
             commands::files::read_file,
             commands::files::write_file,
             commands::files::list_directory,
             commands::files::get_file_mtime,
             commands::files::get_config_path,
+            // AI transport + Claude Code credentials
+            commands::ai::ai_http,
+            commands::ai::claude_read_credentials,
+            commands::ai::claude_write_oauth,
+            // Filesystem watcher for external (MCP/OneDrive) note changes
+            watcher::start_notes_watcher,
             update_shortcuts,
         ])
         .run(tauri::generate_context!())
