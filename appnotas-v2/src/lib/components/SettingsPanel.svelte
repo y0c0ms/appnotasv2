@@ -237,6 +237,28 @@
         }
     }
 
+    async function selectTerminalDirectory() {
+        try {
+            const selected = await openDialog({
+                directory: true,
+                multiple: false,
+                title: 'Select Terminal Start Directory'
+            });
+
+            if (selected && typeof selected === 'string') {
+                settingsStore.update(s => ({ ...s, terminalDirectory: selected }));
+                settingsStore.save();
+            }
+        } catch (err) {
+            console.error('Failed to select terminal directory:', err);
+        }
+    }
+
+    function clearTerminalDirectory() {
+        settingsStore.update(s => ({ ...s, terminalDirectory: '' }));
+        settingsStore.save();
+    }
+
     function close() {
         settingsOpen.set(false);
     }
@@ -368,6 +390,24 @@
                 </div>
             </div>
             <p class="hint">Where your .md notes and files are stored</p>
+
+            <div class="setting-item column" style="margin-top: 1rem;">
+                <span class="label">Terminal Start Directory</span>
+                <div class="dir-picker">
+                    <span class="dir-path" title={$settingsStore.terminalDirectory}>
+                        {$settingsStore.terminalDirectory || 'Follow notes folder / file explorer'}
+                    </span>
+                    <button class="btn-picker" on:click={selectTerminalDirectory}>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center;"><FolderOpen size={16} /> Browse</div>
+                    </button>
+                    {#if $settingsStore.terminalDirectory}
+                        <button class="btn-picker" on:click={clearTerminalDirectory} title="Reset to default">
+                            <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center;"><X size={16} /> Reset</div>
+                        </button>
+                    {/if}
+                </div>
+            </div>
+            <p class="hint">Where new terminal tabs open. Applies to sessions started after the change.</p>
         </section>
 
         <section>

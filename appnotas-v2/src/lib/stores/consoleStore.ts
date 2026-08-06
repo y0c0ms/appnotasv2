@@ -34,8 +34,12 @@ function createConsoleStore() {
 					const message = args.map(arg => {
 						if (arg instanceof Error) {
 							return `${arg.name}: ${arg.message}\n${arg.stack || ''}`;
-						} else if (typeof arg === 'object') {
-							return `[Object: ${arg?.constructor?.name || 'Unknown'}]`;
+						} else if (typeof arg === 'object' && arg !== null) {
+							try {
+								return JSON.stringify(arg);
+							} catch (e) {
+								return `[Object: ${arg?.constructor?.name || 'Unknown'}]`;
+							}
 						}
 						return String(arg);
 					}).join(' ');

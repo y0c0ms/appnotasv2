@@ -10,6 +10,7 @@ export const codeInsertRequested = writable(false);
 export const fileInsertRequested = writable(false);
 export const listModeToggleRequested = writable(false);
 export const settingsOpen = writable(false);
+export const modelsSidebarOpen = writable(false);
 export const activeTab = writable<'notes' | 'files' | 'tasks'>('notes');
 
 async function updateZoom(delta: number) {

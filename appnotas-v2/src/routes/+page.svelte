@@ -21,7 +21,10 @@
 		taskNotesList
 	} from '$lib/stores/notes';
 	import { openFiles, activeFile, currentDirectory, terminalVisible, terminalHeight } from '$lib/stores/files';
-	import { saveRequested, commandPaletteOpen, colorChangeRequested, setupGlobalShortcuts, settingsOpen, activeTab } from '$lib/stores/shortcuts';
+	import { saveRequested, commandPaletteOpen, colorChangeRequested, setupGlobalShortcuts, settingsOpen, modelsSidebarOpen, activeTab } from '$lib/stores/shortcuts';
+	import LocalModelsPanel from '$lib/components/LocalModelsPanel.svelte';
+	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
+	import { Bot } from 'lucide-svelte';
 	import { focusArea } from '$lib/stores/focus';
 	import { settingsStore } from '$lib/stores/settings';
     import { aiState } from '$lib/stores/ai';
@@ -483,16 +486,38 @@
 		document.addEventListener('mousemove', onMouseMove);
 		document.addEventListener('mouseup', onMouseUp);
 	}
+
+	const MODELS_MIN_WIDTH = 260;
+	const MODELS_MAX_WIDTH = 800;
+
+	function setModelsWidth(px: number) {
+		const clamped = Math.max(MODELS_MIN_WIDTH, Math.min(MODELS_MAX_WIDTH, Math.round(px)));
+		settingsStore.update(s => ({ ...s, modelsSidebarWidth: clamped }));
+	}
+
+	// The panel's contents scale with Ctrl+= / Ctrl+-, so its column has to scale
+	// too; the stored width stays the zoom-independent base.
+	let modelsWidthPx = $derived(
+		Math.round($settingsStore.modelsSidebarWidth * ($settingsStore.zoomLevel || 1))
+	);
 </script>
 
 
 <div class="app">
 	<Sidebar />
 
-	<div class="main-grid" class:show-settings={$settingsOpen}>
+	<div
+		class="main-grid"
+		class:show-settings={$settingsOpen}
+		class:show-models={$modelsSidebarOpen}
+		style={`grid-template-columns: 1fr${$modelsSidebarOpen ? ` ${modelsWidthPx}px` : ''}${$settingsOpen ? ' 350px' : ''};`}
+	>
 		<div class="editor-section">
+			<!-- Dragging the empty header area moves the window; Tauri only starts a
+			     drag when the mousedown target itself carries the attribute, so the
+			     buttons and the logo below stay clickable. -->
 			<header data-tauri-drag-region>
-				<div class="header-branding" style="display: flex; align-items: center; gap: 0.5rem; padding-left: 0.5rem;">
+				<div class="header-branding" data-tauri-drag-region style="display: flex; align-items: center; gap: 0.5rem; padding-left: 0.5rem;">
 					<button class="btn-icon" onclick={() => settingsStore.toggleSidebar()} title="Toggle Sidebar">
 						<PanelLeft size={18} />
 					</button>
@@ -521,6 +546,14 @@
 						title="Toggle Terminal (Ctrl+`)"
 					>
 						&gt;_
+					</button>
+					<button 
+						class="btn-icon" 
+						class:active={$modelsSidebarOpen}
+						onclick={() => modelsSidebarOpen.update(v => !v)} 
+						title="Toggle Local Models & OCR"
+					>
+						<Bot size={18} />
 					</button>
 					<button class="btn-icon" onclick={() => settingsOpen.update(v => !v)} title="Settings (Ctrl+,)">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -656,7 +689,7 @@
 							aria-label="Resize Terminal"
 						></button>
 						<Terminal 
-							cwd={$activeTab === 'files' ? $currentDirectory : ($notesDirectory || '')} 
+							cwd={$settingsStore.terminalDirectory || ($activeTab === 'files' ? $currentDirectory : ($notesDirectory || ''))}
 							visible={true} 
 						/>
 					</div>
@@ -681,6 +714,22 @@
 			{/if}
 		</div>
 
+		{#if $modelsSidebarOpen}
+			<div class="models-sidebar" style={`width: ${modelsWidthPx}px`}>
+				<ResizeHandle
+					edge="left"
+					label="Resize models sidebar"
+					onmove={(clientX) => {
+						const zoom = $settingsStore.zoomLevel || 1;
+						const onScreen = window.innerWidth - clientX - ($settingsOpen ? 350 : 0);
+						setModelsWidth(onScreen / zoom);
+					}}
+					onstep={(delta) => setModelsWidth($settingsStore.modelsSidebarWidth + delta)}
+					onend={() => settingsStore.save()}
+				/>
+				<LocalModelsPanel />
+			</div>
+		{/if}
 		{#if $settingsOpen}
 			<SettingsPanel />
 		{/if}
@@ -741,15 +790,20 @@
 	.main-grid {
 		flex: 1;
 		display: grid;
+		/* Column widths come from an inline style: they track the draggable
+		   sidebar widths, so no transition here or dragging feels rubbery. */
 		grid-template-columns: 1fr;
 		height: 100vh;
 		background-color: #09090b;
-		transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 		overflow: hidden;
 	}
 
-	.main-grid.show-settings {
-		grid-template-columns: 1fr 350px;
+	.models-sidebar {
+		position: relative;
+		height: 100%;
+		border-left: 1px solid #2a2a2a;
+		background: #09090b;
+		overflow: hidden;
 	}
 
 	.editor-section {

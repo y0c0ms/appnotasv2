@@ -19,9 +19,16 @@ export interface AppSettings {
     pinnedNoteIds: string[];
     autostart: boolean;
     defaultShell: string;
+    /** Working directory new terminal sessions start in. Empty = follow the
+     *  notes folder (Notes/Tasks tabs) or the file explorer (Files tab). */
+    terminalDirectory: string;
     selectedTaskFileId: string;
     editorFont: string;
     sidebarCollapsed: boolean;
+    /** Draggable width of the left (notes/files/tasks) sidebar, in px. */
+    sidebarWidth: number;
+    /** Draggable width of the right local-models sidebar, in px. */
+    modelsSidebarWidth: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -59,9 +66,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     pinnedNoteIds: [],
     autostart: false,
     defaultShell: 'powershell',
+    terminalDirectory: '',
     selectedTaskFileId: '',
     editorFont: 'Inter',
-    sidebarCollapsed: false
+    sidebarCollapsed: false,
+    sidebarWidth: 250,
+    modelsSidebarWidth: 340
 };
 
 let settingsPath = ''; 

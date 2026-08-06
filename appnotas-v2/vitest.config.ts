@@ -6,6 +6,8 @@ export default defineConfig({
     test: {
         globals: true,
         environment: 'jsdom',
+        // tests/e2e is Playwright's; its specs throw if vitest collects them.
+        exclude: ['node_modules/**', 'tests/e2e/**'],
     },
     resolve: {
         alias: {

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.0"
+version = "0.4.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -40,7 +40,9 @@ notify = "6"
 #   needs no C crypto libraries (no aws-lc-rs/ring), keeping the build light.
 # - `system-proxy`: pick up an OS-level proxy (common with Zscaler) in addition
 #   to HTTP(S)_PROXY env vars, which reqwest already honours.
-reqwest = { version = "0.12", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy", "json", "stream"] }
+# Stream combinators for reading the chunked Ollama NDJSON response in `ai_stream`.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 dirs = "6"
 # Pure note logic (search) — kept in its own crate so it can be unit-tested
 # without linking the GUI/WebView stack. Test with: cargo test -p notes-core

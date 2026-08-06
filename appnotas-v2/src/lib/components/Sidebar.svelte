@@ -5,9 +5,22 @@
 	import TaskList from './TaskList.svelte';
 	import { Notebook, Folder, ListTodo } from 'lucide-svelte';
 	import { settingsStore } from '$lib/stores/settings';
+	import ResizeHandle from './ResizeHandle.svelte';
+
+	const MIN_WIDTH = 180;
+	const MAX_WIDTH = 640;
+
+	function setWidth(px: number) {
+		const clamped = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(px)));
+		settingsStore.update(s => ({ ...s, sidebarWidth: clamped }));
+	}
 </script>
 
-<div class="sidebar" class:collapsed={$settingsStore.sidebarCollapsed}>
+<div
+	class="sidebar"
+	class:collapsed={$settingsStore.sidebarCollapsed}
+	style={$settingsStore.sidebarCollapsed ? undefined : `width: ${$settingsStore.sidebarWidth}px`}
+>
 	{#if !$settingsStore.sidebarCollapsed}
 		<div class="tabs">
 			<button 
@@ -42,11 +55,20 @@
 				<TaskList />
 			{/if}
 		</div>
+
+		<ResizeHandle
+			edge="right"
+			label="Resize sidebar"
+			onmove={(clientX) => setWidth(clientX)}
+			onstep={(delta) => setWidth($settingsStore.sidebarWidth + delta)}
+			onend={() => settingsStore.save()}
+		/>
 	{/if}
 </div>
 
 <style>
 	.sidebar {
+		position: relative;
 		width: 250px;
 		height: 100vh;
 		background: #09090b;
@@ -54,7 +76,6 @@
 		display: flex;
 		flex-direction: column;
 		flex-shrink: 0;
-		transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 		overflow: hidden;
 	}
 
