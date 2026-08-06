@@ -16,9 +16,11 @@ export default defineConfig({
 		channel: undefined
 	},
 	webServer: {
-		command: 'bun run build && bunx vite preview --port 4173 --strictPort',
+		// The build runs as its own step (`test:e2e` locally, a workflow step in CI):
+		// bundling inside this command pushed a cold runner past the start timeout.
+		command: 'bunx vite preview --port 4173 --strictPort --host 127.0.0.1',
 		url: 'http://127.0.0.1:4173',
 		reuseExistingServer: !process.env.CI,
-		timeout: 180_000
+		timeout: 60_000
 	}
 });

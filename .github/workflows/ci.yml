@@ -13,7 +13,7 @@ defaults:
 jobs:
   frontend:
     name: types + unit tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -23,12 +23,15 @@ jobs:
 
   e2e:
     name: e2e (Chromium, Tauri IPC mocked)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
+      # Built here rather than from playwright's webServer command, which has a
+      # start timeout a cold runner blows past.
+      - run: bun run build
       - run: bunx playwright test
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
@@ -39,7 +42,7 @@ jobs:
 
   rust:
     name: cargo check + tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

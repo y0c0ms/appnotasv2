@@ -222,9 +222,11 @@
 	}
 </script>
 
-<!-- Every size inside the panel is in `em`, so this one declaration makes the
-     whole panel follow Ctrl+= / Ctrl+- like the editor and terminal do. -->
-<div class="models-panel" style={`font-size: ${0.8 * ($settingsStore.zoomLevel || 1)}rem`}>
+<!-- Every size inside the panel is in `em`, so this one declaration sets the
+     panel's scale and makes it follow Ctrl+= / Ctrl+- like the editor does.
+     1.2rem base * the 0.73em message rule ≈ 14px of body text, matching the
+     note editor instead of the ~9px the old 0.8rem base produced. -->
+<div class="models-panel" style={`font-size: ${1.2 * ($settingsStore.zoomLevel || 1)}rem`}>
 	<!-- Top Bar / Model & History Selector -->
 	<div class="header">
 		<div class="model-select-wrapper">
