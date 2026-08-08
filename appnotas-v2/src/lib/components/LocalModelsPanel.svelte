@@ -9,6 +9,7 @@
 		type ChatSession, 
 		type ChatMessage 
 	} from '$lib/stores/localChatStore';
+	import type { LocalRuntime, ModelTarget } from '$lib/services/localRuntimes';
 	import { 
 		Bot, 
 		Image as ImageIcon, 
@@ -24,18 +25,22 @@
 		History
 	} from 'lucide-svelte';
 
-	/** A send parked while another turn is streaming; the model is captured at
+	/** A send parked while another turn is streaming; the target is captured at
 	 *  enqueue time so switching models mid-stream doesn't retarget it. */
 	interface QueuedSend {
 		prompt: string;
 		ocr: string;
-		model: string;
+		target: ModelTarget;
 	}
 
-	let models = $state<string[]>([]);
-	let selectedModel = $state<string>('qwen-coder-7b:latest');
+	let runtimes = $state<LocalRuntime[]>([]);
+	/** `runtimeId` and model of the current selection; empty until discovery
+	 *  finds something, because no model name can be assumed to exist. */
+	let selectedRuntimeId = $state<string>('');
+	let selectedModel = $state<string>('');
 	let userInput = $state<string>('');
 	let isOcrLoading = $state<boolean>(false);
+	let isDiscovering = $state<boolean>(false);
 	let currentOcrText = $state<string>('');
 	let sendQueue = $state<QueuedSend[]>([]);
 	let copiedIndex = $state<number | null>(null);
@@ -55,8 +60,28 @@
 		currentSession?.messages || []
 	);
 
+	/** Servers that actually have something loaded; the rest are reported in
+	 *  the status bar rather than offered as an empty dropdown group. */
+	let servingRuntimes = $derived<LocalRuntime[]>(runtimes.filter(r => r.models.length > 0));
+
+	let currentRuntimeModels = $derived<string[]>(
+		servingRuntimes.find(r => r.id === selectedRuntimeId)?.models ?? []
+	);
+
+	let selectedTarget = $derived<ModelTarget | null>((() => {
+		const runtime = servingRuntimes.find(r => r.id === selectedRuntimeId);
+		if (!runtime || !selectedModel) return null;
+		return {
+			runtimeId: runtime.id,
+			label: runtime.label,
+			api: runtime.api,
+			chatUrl: runtime.chatUrl,
+			model: selectedModel
+		};
+	})());
+
 	onMount(() => {
-		fetchModels();
+		discoverRuntimes();
 		scrollToBottom();
 	});
 
@@ -72,25 +97,53 @@
 		}
 	}
 
-	async function fetchModels() {
+	/**
+	 * Ask Rust which local model servers are up, then restore the last
+	 * selection if it still exists. Nothing is invented when the probe comes
+	 * back empty: a made-up model name only produces a confusing 404 later.
+	 */
+	async function discoverRuntimes() {
+		isDiscovering = true;
 		try {
-			statusText = 'Fetching Ollama models...';
-			const fetched = await invoke<string[]>('list_ollama_models');
-			if (fetched && fetched.length > 0) {
-				models = fetched;
-				if (currentSession && models.includes(currentSession.model)) {
-					selectedModel = currentSession.model;
-				} else {
-					selectedModel = models[0];
-				}
-				statusText = `Loaded ${models.length} model(s).`;
-			} else {
-				models = ['qwen-coder-7b:latest', 'llama3.2-3b:latest'];
-				statusText = 'Ollama offline or no models found.';
+			statusText = 'Looking for local model servers...';
+			runtimes = await invoke<LocalRuntime[]>('discover_local_runtimes', {
+				extraEndpoints: $settingsStore.localAiEndpoints ?? []
+			});
+
+			const serving = runtimes.filter(r => r.models.length > 0);
+			if (serving.length === 0) {
+				selectedRuntimeId = '';
+				selectedModel = '';
+				const idle = runtimes.map(r => r.label).join(', ');
+				statusText = idle
+					? `${idle} running but serving no models.`
+					: 'No local model server found.';
+				return;
 			}
+
+			const preferred =
+				serving.find(
+					r =>
+						r.id === (currentSession?.runtimeId || $settingsStore.lastLocalRuntimeId) &&
+						r.models.includes(currentSession?.model || $settingsStore.lastLocalModel)
+				) ?? serving[0];
+			const preferredModel =
+				preferred.models.find(
+					m => m === (currentSession?.model || $settingsStore.lastLocalModel)
+				) ?? preferred.models[0];
+
+			selectedRuntimeId = preferred.id;
+			selectedModel = preferredModel;
+
+			const total = serving.reduce((sum, r) => sum + r.models.length, 0);
+			statusText = `${total} model(s) across ${serving.map(r => r.label).join(', ')}.`;
 		} catch (err: unknown) {
-			models = ['qwen-coder-7b:latest', 'llama3.2-3b:latest'];
-			statusText = 'Could not fetch Ollama models.';
+			runtimes = [];
+			selectedRuntimeId = '';
+			selectedModel = '';
+			statusText = `Could not probe local servers: ${err instanceof Error ? err.message : String(err)}`;
+		} finally {
+			isDiscovering = false;
 		}
 	}
 
@@ -98,7 +151,7 @@
 		try {
 			isOcrLoading = true;
 			statusText = 'Processing clipboard image...';
-			console.info('🖼️ [OCR] Reading image from Windows clipboard...');
+			console.info('🖼️ [OCR] Reading image from the system clipboard...');
 			const extracted = await invoke<string>('run_ocr', { imagePath: null });
 			if (!extracted || extracted.trim() === '') {
 				statusText = 'No text detected in clipboard.';
@@ -149,10 +202,16 @@
 	async function sendMessage() {
 		if (!userInput.trim() && !currentOcrText) return;
 
+		const target = selectedTarget;
+		if (!target) {
+			statusText = 'Pick a model first — no local model server is serving one.';
+			return;
+		}
+
 		const item: QueuedSend = {
 			prompt: userInput.trim(),
 			ocr: currentOcrText,
-			model: selectedModel
+			target
 		};
 
 		userInput = '';
@@ -171,11 +230,11 @@
 
 	async function runSend(item: QueuedSend) {
 		if (!currentSession) {
-			localChatStore.createSession(item.model);
+			localChatStore.createSession(item.target);
 		}
 
-		statusText = `Streaming response from ${item.model}...`;
-		await localChatStore.streamOllamaChat($activeId, item.model, item.prompt, item.ocr);
+		statusText = `Streaming response from ${item.target.model} on ${item.target.label}...`;
+		await localChatStore.streamChat($activeId, item.target, item.prompt, item.ocr);
 
 		const next = sendQueue[0];
 		if (next) {
@@ -204,8 +263,23 @@
 		}
 	}
 
+	/** Remember the pick so the next launch reselects it if it still exists. */
+	function rememberSelection() {
+		settingsStore.update(s => ({
+			...s,
+			lastLocalRuntimeId: selectedRuntimeId,
+			lastLocalModel: selectedModel
+		}));
+	}
+
+	/** Model names don't carry across servers, so switching server re-picks. */
+	function onRuntimeChange() {
+		selectedModel = servingRuntimes.find(r => r.id === selectedRuntimeId)?.models[0] ?? '';
+		rememberSelection();
+	}
+
 	function handleNewChat() {
-		localChatStore.createSession(selectedModel);
+		localChatStore.createSession(selectedTarget);
 		showHistoryMenu = false;
 		currentOcrText = '';
 		statusText = 'Started new chat.';
@@ -231,13 +305,40 @@
 	<div class="header">
 		<div class="model-select-wrapper">
 			<Bot size={14} class="icon-bot" />
-			<select bind:value={selectedModel} class="model-select">
-				{#each models as m}
-					<option value={m}>{m}</option>
-				{/each}
+			{#if servingRuntimes.length > 1}
+				<select
+					bind:value={selectedRuntimeId}
+					onchange={onRuntimeChange}
+					class="model-select runtime-select"
+					title="Local model server"
+				>
+					{#each servingRuntimes as runtime}
+						<option value={runtime.id}>{runtime.label}</option>
+					{/each}
+				</select>
+			{/if}
+			<select
+				bind:value={selectedModel}
+				onchange={rememberSelection}
+				class="model-select"
+				disabled={currentRuntimeModels.length === 0}
+				title={selectedTarget ? `${selectedTarget.label} — ${selectedTarget.chatUrl}` : statusText}
+			>
+				{#if currentRuntimeModels.length === 0}
+					<option value="">No local models found</option>
+				{:else}
+					{#each currentRuntimeModels as model}
+						<option value={model}>{model}</option>
+					{/each}
+				{/if}
 			</select>
-			<button class="btn-icon" onclick={fetchModels} title="Refresh models">
-				<RefreshCw size={12} class={$isStreaming ? 'spin' : ''} />
+			<button
+				class="btn-icon"
+				onclick={discoverRuntimes}
+				disabled={isDiscovering}
+				title="Rescan for local model servers"
+			>
+				<RefreshCw size={12} class={isDiscovering ? 'spin' : ''} />
 			</button>
 		</div>
 
@@ -315,8 +416,10 @@
 		{#if currentMessages.length === 0}
 			<div class="empty-state">
 				<Sparkles size={24} />
-				<p>Chat with Local Ollama Models</p>
-				<span class="subtext">Supports real-time streaming & persistent chat history</span>
+				<p>Chat with your local models</p>
+				<span class="subtext">
+					Works with Ollama, llama.cpp, LM Studio, vLLM, Jan, KoboldCpp and TabbyAPI
+				</span>
 			</div>
 		{:else}
 			{#each currentMessages as msg, idx}
@@ -435,6 +538,16 @@
 		outline: none;
 		min-width: 0;
 		text-overflow: ellipsis;
+	}
+
+	/* The server picker only appears with more than one server running, and it
+	   gets the smaller share so long model names stay readable. */
+	.runtime-select {
+		flex: 0 1 7em;
+	}
+
+	.model-select:disabled {
+		opacity: 0.55;
 	}
 
 	.header-actions {

@@ -21,7 +21,7 @@
 		taskNotesList
 	} from '$lib/stores/notes';
 	import { openFiles, activeFile, currentDirectory, terminalVisible, terminalHeight } from '$lib/stores/files';
-	import { saveRequested, commandPaletteOpen, colorChangeRequested, setupGlobalShortcuts, settingsOpen, modelsSidebarOpen, activeTab } from '$lib/stores/shortcuts';
+	import { saveRequested, commandPaletteOpen, colorChangeRequested, setupGlobalShortcuts, settingsOpen, activeTab } from '$lib/stores/shortcuts';
 	import LocalModelsPanel from '$lib/components/LocalModelsPanel.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import { Bot } from 'lucide-svelte';
@@ -509,8 +509,8 @@
 	<div
 		class="main-grid"
 		class:show-settings={$settingsOpen}
-		class:show-models={$modelsSidebarOpen}
-		style={`grid-template-columns: 1fr${$modelsSidebarOpen ? ` ${modelsWidthPx}px` : ''}${$settingsOpen ? ' 350px' : ''};`}
+		class:show-models={$settingsStore.modelsSidebarOpen}
+		style={`grid-template-columns: 1fr${$settingsStore.modelsSidebarOpen ? ` ${modelsWidthPx}px` : ''}${$settingsOpen ? ' 350px' : ''};`}
 	>
 		<div class="editor-section">
 			<!-- Dragging the empty header area moves the window; Tauri only starts a
@@ -549,8 +549,8 @@
 					</button>
 					<button 
 						class="btn-icon" 
-						class:active={$modelsSidebarOpen}
-						onclick={() => modelsSidebarOpen.update(v => !v)} 
+						class:active={$settingsStore.modelsSidebarOpen}
+						onclick={() => settingsStore.update(s => ({ ...s, modelsSidebarOpen: !s.modelsSidebarOpen }))}
 						title="Toggle Local Models & OCR"
 					>
 						<Bot size={18} />
@@ -714,7 +714,7 @@
 			{/if}
 		</div>
 
-		{#if $modelsSidebarOpen}
+		{#if $settingsStore.modelsSidebarOpen}
 			<div class="models-sidebar" style={`width: ${modelsWidthPx}px`}>
 				<ResizeHandle
 					edge="left"

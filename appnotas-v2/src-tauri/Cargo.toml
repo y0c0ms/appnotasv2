@@ -29,7 +29,8 @@ tauri-plugin-fs = "2"
 tauri-plugin-global-shortcut = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-pty = "0.2.1"
-tokio = { version = "1", features = ["time"] }
+# `rt` powers the `spawn_blocking` that keeps OCR off the async workers.
+tokio = { version = "1", features = ["time", "rt"] }
 # Filesystem watcher so the app refreshes when the notes folder is changed
 # externally (e.g. by the local MCP server or OneDrive sync).
 notify = "6"
@@ -52,6 +53,11 @@ notes-core = { path = "notes-core" }
 # spawning the interactive wsl.exe stub. Not compiled on Linux/macOS.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+
+# Tests build a tokio runtime by hand to drive the async commands, and need the
+# IO driver that reqwest runs on.
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "net", "time", "io-util"] }
 
 [workspace]
 members = ["notes-core"]

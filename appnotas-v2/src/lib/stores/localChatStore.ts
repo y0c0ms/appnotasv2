@@ -2,6 +2,13 @@ import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { settingsStore } from './settings';
+import {
+	chatRequestBody,
+	StreamDecoder,
+	type ModelTarget,
+	type ToolCall,
+	type WireMessage
+} from '$lib/services/localRuntimes';
 
 export interface ChatMessage {
 	id: string;
@@ -15,35 +22,14 @@ export interface ChatMessage {
 export interface ChatSession {
 	id: string;
 	title: string;
+	/** Model this session last ran on, and the server that served it. Both are
+	 *  empty until a turn is sent, because which servers exist is only known
+	 *  after discovery. */
 	model: string;
+	runtimeId: string;
 	createdAt: number;
 	updatedAt: number;
 	messages: ChatMessage[];
-}
-
-export interface OllamaToolCall {
-	function: { name: string; arguments: unknown };
-}
-
-export interface OllamaMessage {
-	role: string;
-	content: string;
-	tool_calls?: OllamaToolCall[];
-}
-
-interface OllamaStreamLine {
-	message?: { content?: string; tool_calls?: OllamaToolCall[] };
-}
-
-/** Ollama streams NDJSON; a malformed line is skipped rather than aborting the turn. */
-function parseStreamLine(line: string): OllamaStreamLine | null {
-	const trimmed = line.trim();
-	if (!trimmed) return null;
-	try {
-		return JSON.parse(trimmed) as OllamaStreamLine;
-	} catch {
-		return null;
-	}
 }
 
 function parseToolArgs(raw: unknown): Record<string, unknown> {
@@ -111,11 +97,11 @@ const MCP_TOOLS = [
 		type: 'function',
 		function: {
 			name: 'run_ocr',
-			description: 'Extract text from an image on the Windows clipboard or an image file path',
+			description: 'Extract text from an image on the system clipboard or an image file path',
 			parameters: {
 				type: 'object',
 				properties: {
-					image_path: { type: 'string', description: 'Path to image file, or null to read Windows clipboard' }
+					image_path: { type: 'string', description: 'Path to image file, or null to read the system clipboard' }
 				}
 			}
 		}
@@ -138,10 +124,11 @@ const HISTORY_MESSAGES = 8;
 /**
  * Tools are also described in the prompt, not just in the `tools` field.
  *
- * Ollama can only expose the `tools` field to models whose chat template renders
- * it; a locally registered GGUF with a plain template silently drops it. Stating
- * the contract in a system message is what actually makes the local MCP tools
- * reachable, and it stays in sync with `MCP_TOOLS` because it is generated here.
+ * A server can only expose the `tools` field to models whose chat template
+ * renders it; a locally registered GGUF with a plain template silently drops
+ * it, and some servers reject the field outright. Stating the contract in a
+ * system message is what actually makes the local MCP tools reachable, and it
+ * stays in sync with `MCP_TOOLS` because it is generated here.
  */
 const TOOL_SYSTEM_PROMPT = [
 	'You are the assistant inside AppNotas and you can operate the user\'s local notes through tools.',
@@ -159,7 +146,7 @@ const TOOL_SYSTEM_PROMPT = [
 	'Never claim you cannot read local files — use the tools instead.'
 ].join('\n');
 
-function asToolCall(value: unknown): OllamaToolCall | null {
+function asToolCall(value: unknown): ToolCall | null {
 	if (!value || typeof value !== 'object') return null;
 	const obj = value as { name?: unknown; arguments?: unknown; parameters?: unknown };
 	if (typeof obj.name !== 'string' || TOOL_NAMES[obj.name] !== true) return null;
@@ -206,19 +193,31 @@ function firstJsonObject(text: string): unknown {
 /**
  * Recover a tool call a model wrote as text.
  *
- * Ollama only fills `message.tool_calls` for models whose chat template renders
- * the tool-call tokens its parser looks for. A locally registered GGUF with a
- * plain template drops that, and the model instead writes
+ * A server only fills native `tool_calls` for models whose chat template
+ * renders the tool-call tokens its parser looks for. A locally registered GGUF
+ * with a plain template drops that, and the model instead writes
  * `{"name": …, "arguments": …}` into the answer — often followed by invented
  * results, since it has not seen the real ones yet. So: accept only objects
  * naming a known tool, and drop the rest of that message; the genuine answer is
  * produced in the follow-up round, after the tool result is fed back.
  */
-export function extractTextToolCalls(content: string): { calls: OllamaToolCall[]; cleaned: string } {
+export function extractTextToolCalls(content: string): { calls: ToolCall[]; cleaned: string } {
 	const fenced = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
 	const candidate = asToolCall(firstJsonObject(fenced ? fenced[1] : content));
 
 	return candidate ? { calls: [candidate], cleaned: '' } : { calls: [], cleaned: content };
+}
+
+function newSession(target?: ModelTarget | null): ChatSession {
+	return {
+		id: 'sess_' + Date.now(),
+		title: 'New Chat',
+		model: target?.model ?? '',
+		runtimeId: target?.runtimeId ?? '',
+		createdAt: Date.now(),
+		updatedAt: Date.now(),
+		messages: []
+	};
 }
 
 function loadStoredSessions(): ChatSession[] {
@@ -232,15 +231,7 @@ function loadStoredSessions(): ChatSession[] {
 	} catch (e) {
 		console.error('Failed to load chat sessions:', e);
 	}
-	const defaultSession: ChatSession = {
-		id: 'sess_' + Date.now(),
-		title: 'New Chat',
-		model: 'qwen-coder-7b:latest',
-		createdAt: Date.now(),
-		updatedAt: Date.now(),
-		messages: []
-	};
-	return [defaultSession];
+	return [newSession()];
 }
 
 function loadActiveSessionId(sessions: ChatSession[]): string {
@@ -260,6 +251,10 @@ function createLocalChatStore() {
 	const activeIdStore = writable<string>(initialActiveId);
 	const isStreamingStore = writable<boolean>(false);
 
+	/** Servers that answered a `tools` payload with an error, so the next turn
+	 *  skips it instead of failing again. */
+	const toolsRejected = new Set<string>();
+
 	sessionsStore.subscribe(sessions => {
 		if (typeof window !== 'undefined') {
 			try {
@@ -278,7 +273,10 @@ function createLocalChatStore() {
 
 	async function executeToolCall(toolName: string, args: Record<string, unknown>): Promise<string> {
 		console.info(`⚡ [Tool Call] Executing '${toolName}' with args:`, JSON.stringify(args));
-		const notesDir = get(settingsStore).notesDirectory || 'C:/Users/manuesantos/OneDrive - Grupo Jerónimo Martins/Documents/notes';
+		const notesDir = get(settingsStore).notesDirectory;
+		if (!notesDir) {
+			return 'No notes directory is configured. Ask the user to pick one in Settings.';
+		}
 
 		try {
 			if (toolName === 'list_notes') {
@@ -345,54 +343,71 @@ function createLocalChatStore() {
 
 	/**
 	 * One model turn: tokens land in the UI as they arrive over `ai-stream-chunk`,
-	 * then the accumulated body returned by the command is used as the source of
-	 * truth for the message text and any tool calls.
+	 * then the accumulated body returned by the command is decoded again as the
+	 * source of truth for the message text and any tool calls.
 	 */
-	async function streamTurn(sessionId: string, model: string, messages: OllamaMessage[]) {
-		const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+	async function streamTurn(sessionId: string, target: ModelTarget, messages: WireMessage[]) {
 		const session = get(sessionsStore).find(s => s.id === sessionId);
 		const last = session?.messages[session.messages.length - 1];
 		const base = last?.role === 'assistant' ? last.content : '';
 
-		const unlisten = await listen<{ id: string; chunk: string }>('ai-stream-chunk', evt => {
-			if (evt.payload.id !== requestId) return;
-			const token = parseStreamLine(evt.payload.chunk)?.message?.content;
-			if (token) mutateLastAssistant(sessionId, c => c + token);
-		});
+		async function send(tools: unknown[] | null): Promise<string> {
+			const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+			// A separate decoder from the reconciling one below: this one only
+			// has to turn each arriving line into visible text.
+			const live = new StreamDecoder(target.api);
 
-		try {
-			const full = await invoke<string>('ai_stream', {
-				req: {
-					id: requestId,
-					url: 'http://localhost:11434/api/chat',
-					body: JSON.stringify({ model, messages, tools: MCP_TOOLS, stream: true })
-				}
+			const unlisten = await listen<{ id: string; chunk: string }>('ai-stream-chunk', evt => {
+				if (evt.payload.id !== requestId) return;
+				const token = live.push(evt.payload.chunk);
+				if (token) mutateLastAssistant(sessionId, c => c + token);
 			});
 
-			let content = '';
-			const toolCalls: OllamaToolCall[] = [];
-			for (const line of full.split('\n')) {
-				const json = parseStreamLine(line);
-				if (!json) continue;
-				if (json.message?.content) content += json.message.content;
-				if (json.message?.tool_calls) toolCalls.push(...json.message.tool_calls);
+			try {
+				return await invoke<string>('ai_stream', {
+					req: {
+						id: requestId,
+						url: target.chatUrl,
+						body: chatRequestBody(target, messages, tools)
+					}
+				});
+			} finally {
+				unlisten();
 			}
-
-			if (toolCalls.length === 0) {
-				const textual = extractTextToolCalls(content);
-				if (textual.calls.length > 0) {
-					toolCalls.push(...textual.calls);
-					content = textual.cleaned;
-				}
-			}
-
-			// A chunk event can still be in flight when the command resolves, so the
-			// live text is replaced rather than trusted.
-			mutateLastAssistant(sessionId, () => base + content);
-			return { content, toolCalls };
-		} finally {
-			unlisten();
 		}
+
+		let full: string;
+		try {
+			full = await send(toolsRejected.has(target.runtimeId) ? null : MCP_TOOLS);
+		} catch (err: unknown) {
+			// Servers meant for plain completion (KoboldCpp, older llama.cpp
+			// builds) reject a `tools` field outright. The system prompt already
+			// describes the tools, so the turn still works without the field and
+			// `extractTextToolCalls` recovers whatever the model writes as text.
+			if (toolsRejected.has(target.runtimeId)) throw err;
+			toolsRejected.add(target.runtimeId);
+			console.warn(`⚠️ [Local AI] ${target.label} rejected tool definitions; retrying without them.`);
+			mutateLastAssistant(sessionId, () => base);
+			full = await send(null);
+		}
+
+		const decoder = new StreamDecoder(target.api);
+		let content = '';
+		for (const line of full.split('\n')) content += decoder.push(line);
+		const toolCalls = decoder.toolCalls();
+
+		if (toolCalls.length === 0) {
+			const textual = extractTextToolCalls(content);
+			if (textual.calls.length > 0) {
+				toolCalls.push(...textual.calls);
+				content = textual.cleaned;
+			}
+		}
+
+		// A chunk event can still be in flight when the command resolves, so the
+		// live text is replaced rather than trusted.
+		mutateLastAssistant(sessionId, () => base + content);
+		return { content, toolCalls };
 	}
 
 	return {
@@ -400,32 +415,18 @@ function createLocalChatStore() {
 		activeId: activeIdStore,
 		isStreaming: isStreamingStore,
 
-		createSession: (model = 'qwen-coder-7b:latest') => {
-			const newSess: ChatSession = {
-				id: 'sess_' + Date.now(),
-				title: 'New Chat',
-				model,
-				createdAt: Date.now(),
-				updatedAt: Date.now(),
-				messages: []
-			};
-			sessionsStore.update(s => [newSess, ...s]);
-			activeIdStore.set(newSess.id);
-			return newSess;
+		createSession: (target?: ModelTarget | null) => {
+			const created = newSession(target);
+			sessionsStore.update(s => [created, ...s]);
+			activeIdStore.set(created.id);
+			return created;
 		},
 
 		deleteSession: (id: string) => {
 			sessionsStore.update(s => {
 				const filtered = s.filter(x => x.id !== id);
 				if (filtered.length === 0) {
-					const fallback: ChatSession = {
-						id: 'sess_' + Date.now(),
-						title: 'New Chat',
-						model: 'qwen-coder-7b:latest',
-						createdAt: Date.now(),
-						updatedAt: Date.now(),
-						messages: []
-					};
+					const fallback = newSession();
 					activeIdStore.set(fallback.id);
 					return [fallback];
 				}
@@ -452,7 +453,7 @@ function createLocalChatStore() {
 			mutateLastAssistant(sessionId, c => c + token);
 		},
 
-		streamOllamaChat: async (sessionId: string, model: string, promptText: string, ocrText?: string) => {
+		streamChat: async (sessionId: string, target: ModelTarget, promptText: string, ocrText?: string) => {
 			isStreamingStore.set(true);
 
 			let fullPrompt = promptText;
@@ -489,15 +490,24 @@ function createLocalChatStore() {
 						if (s.title === 'New Chat') {
 							title = promptText.slice(0, 30).trim() || (ocrText ? 'OCR Document' : 'Chat');
 						}
-						return { ...s, messages: msgs, title, model, updatedAt: Date.now() };
+						return {
+							...s,
+							messages: msgs,
+							title,
+							model: target.model,
+							runtimeId: target.runtimeId,
+							updatedAt: Date.now()
+						};
 					}
 					return s;
 				})
 			);
 
-			console.info(`🤖 [Local AI] Starting stream with model '${model}' (Session: ${sessionId})`);
+			console.info(
+				`🤖 [Local AI] Starting stream with '${target.model}' on ${target.label} (Session: ${sessionId})`
+			);
 
-			const apiMessages: OllamaMessage[] = [
+			const apiMessages: WireMessage[] = [
 				{ role: 'system', content: TOOL_SYSTEM_PROMPT },
 				...existingHistory.slice(-HISTORY_MESSAGES).map(m => ({ role: m.role, content: m.content })),
 				{ role: 'user', content: fullPrompt }
@@ -507,23 +517,29 @@ function createLocalChatStore() {
 				// Assistant → tool → assistant: the tool result is fed back so the
 				// model reports what it did instead of the raw JSON being the answer.
 				for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-					const turn = await streamTurn(sessionId, model, apiMessages);
+					const turn = await streamTurn(sessionId, target, apiMessages);
 					if (turn.toolCalls.length === 0) break;
 
 					apiMessages.push({
 						role: 'assistant',
 						content: turn.content,
-						tool_calls: turn.toolCalls
+						toolCalls: turn.toolCalls
 					});
 
-					for (const tc of turn.toolCalls) {
-						const toolName = tc.function?.name || 'unknown';
-						const toolArgs = parseToolArgs(tc.function?.arguments);
+					for (const [index, call] of turn.toolCalls.entries()) {
+						const toolName = call.function?.name || 'unknown';
+						const toolArgs = parseToolArgs(call.function?.arguments);
 						mutateLastAssistant(sessionId, c => `${c}\n\n⚡ *Executing tool* \`${toolName}\`\n`);
 
 						const toolResult = await executeToolCall(toolName, toolArgs);
 						mutateLastAssistant(sessionId, c => `${c}\`\`\`json\n${toolResult}\n\`\`\`\n\n`);
-						apiMessages.push({ role: 'tool', content: toolResult });
+						// Same id the assistant message advertised, which the OpenAI
+						// API requires to pair a result with its call.
+						apiMessages.push({
+							role: 'tool',
+							content: toolResult,
+							toolCallId: call.id ?? `call_${index}`
+						});
 					}
 				}
 			} catch (err: unknown) {

@@ -135,8 +135,10 @@ pub fn run() {
             commands::ai::ai_stream,
             commands::ai::claude_read_credentials,
             commands::ai::claude_write_oauth,
-            commands::ai::list_ollama_models,
-            commands::ai::run_ocr,
+            // Local model servers (Ollama, llama.cpp, LM Studio, vLLM, ...)
+            commands::local_models::discover_local_runtimes,
+            // Clipboard / file OCR
+            commands::ocr::run_ocr,
             // Filesystem watcher for external (MCP/OneDrive) note changes
             watcher::start_notes_watcher,
             update_shortcuts,

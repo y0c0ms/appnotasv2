@@ -27,8 +27,18 @@ export interface AppSettings {
     sidebarCollapsed: boolean;
     /** Draggable width of the left (notes/files/tasks) sidebar, in px. */
     sidebarWidth: number;
-    /** Draggable width of the right local-models sidebar, in px. */
+    /** Draggable width of the right local-models sidebar, in px, and whether
+     *  it is open — remembered like the left sidebar's collapsed state. */
     modelsSidebarWidth: number;
+    modelsSidebarOpen: boolean;
+    /** Extra base URLs to probe for local model servers, on top of the known
+     *  defaults (Ollama, LM Studio, llama.cpp, vLLM, Jan, KoboldCpp, TabbyAPI).
+     *  For a box on the LAN or a server on a non-standard port. */
+    localAiEndpoints: string[];
+    /** Local server the Models panel selected last, so the choice survives a
+     *  restart. Empty until the user picks one. */
+    lastLocalRuntimeId: string;
+    lastLocalModel: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -71,7 +81,11 @@ const DEFAULT_SETTINGS: AppSettings = {
     editorFont: 'Inter',
     sidebarCollapsed: false,
     sidebarWidth: 250,
-    modelsSidebarWidth: 340
+    modelsSidebarWidth: 340,
+    modelsSidebarOpen: false,
+    localAiEndpoints: [],
+    lastLocalRuntimeId: '',
+    lastLocalModel: ''
 };
 
 let settingsPath = ''; 
@@ -101,14 +115,19 @@ function createSettingsStore() {
                 if (settingsJson) {
                     try {
                         const loaded = JSON.parse(settingsJson);
+                        // Apply the file before awaiting anything else. Every
+                        // await here is a window in which the user can change a
+                        // setting, and a later wholesale `set` throws that change
+                        // away — a dragged sidebar width snapping back, say.
                         set({
                             ...DEFAULT_SETTINGS,
                             ...loaded,
                             // Merge keybinds individually so saved settings from older
                             // versions still pick up newly added default shortcuts
-                            keybinds: { ...DEFAULT_SETTINGS.keybinds, ...(loaded.keybinds ?? {}) },
-                            autostart: await isEnabled().catch(() => false)
+                            keybinds: { ...DEFAULT_SETTINGS.keybinds, ...(loaded.keybinds ?? {}) }
                         });
+                        const autostart = await isEnabled().catch(() => false);
+                        update(s => ({ ...s, autostart }));
                         console.log('✅ Settings loaded from disk');
                         
                         // Sync loaded shortcuts to Rust immediately on startup

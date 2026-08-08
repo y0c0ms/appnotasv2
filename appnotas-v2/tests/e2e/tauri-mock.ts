@@ -35,10 +35,32 @@ export async function installTauriMock(page: Page, notesDir = 'C:/notes') {
 		const bridge = { invocations, emit, streamReplies, chunkDelayMs: 15 };
 		let nextCallbackId = 1;
 
+		// Shaped like the Rust `Note` struct: the notes list sorts on
+		// `updated_at`, so a partial object crashes rendering rather than
+		// merely looking wrong.
 		const notes = [
-			{ id: 'beefprime.md', title: 'BeefPrime', path: `${dir}/beefprime.md` },
-			{ id: 'oidc.md', title: 'OIDC Fabio', path: `${dir}/oidc.md` }
+			{
+				id: 'beefprime.md',
+				title: 'BeefPrime',
+				content: '',
+				path: `${dir}/beefprime.md`,
+				created_at: '2026-01-02T09:00:00Z',
+				updated_at: '2026-01-04T09:00:00Z',
+				tags: [],
+				color: null
+			},
+			{
+				id: 'oidc.md',
+				title: 'OIDC Fabio',
+				content: '',
+				path: `${dir}/oidc.md`,
+				created_at: '2026-01-01T09:00:00Z',
+				updated_at: '2026-01-03T09:00:00Z',
+				tags: [],
+				color: null
+			}
 		];
+		const configPath = `${dir}/appnotas-settings.json`;
 
 		function emit(event: string, payload: unknown) {
 			for (const listener of listeners) {
@@ -80,12 +102,36 @@ export async function installTauriMock(page: Page, notesDir = 'C:/notes') {
 				return lines.join('\n');
 			}
 
-			if (cmd === 'list_ollama_models') return ['qwen-coder-7b:latest', 'llama3.2-3b:latest'];
+			// One Ollama server with two models, which is what the panel renders
+			// and what the streaming assertions below then drive.
+			if (cmd === 'discover_local_runtimes') {
+				return [
+					{
+						id: 'ollama',
+						label: 'Ollama',
+						baseUrl: 'http://127.0.0.1:11434',
+						api: 'ollama',
+						chatUrl: 'http://127.0.0.1:11434/api/chat',
+						models: ['qwen-coder-7b:latest', 'llama3.2-3b:latest']
+					}
+				];
+			}
 			if (cmd === 'list_notes_files') return notes;
+			if (cmd === 'get_config_path') return configPath;
+			// The settings file has to parse and name a notes directory, otherwise
+			// the note tools correctly refuse to run for want of one.
+			if (cmd === 'read_file' && args.path === configPath) {
+				return JSON.stringify({ notesDirectory: dir });
+			}
+			if (cmd === 'detect_shells') {
+				return [
+					{ id: 'bash', name: 'Bash', command: '/bin/bash', available: true },
+					{ id: 'zsh', name: 'Zsh', command: '/bin/zsh', available: true }
+				];
+			}
 			if (cmd === 'read_note' || cmd === 'read_file') return '# BeefPrime\n\nnote body';
 			if (cmd === 'create_note_file') return { id: 'new.md', title: 'New', path: `${dir}/new.md` };
 			if (cmd === 'run_ocr') return 'SERVICEDESK TICKET 13369711';
-			if (cmd === 'get_config_path') return `${dir}/appnotas-settings.json`;
 
 			return null;
 		}

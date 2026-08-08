@@ -51,10 +51,10 @@
     },
     "linux": {
       "deb": {
-        "depends": []
+        "depends": ["python3", "tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-por", "wl-clipboard"]
       },
       "rpm": {
-        "depends": []
+        "depends": ["python3", "tesseract", "tesseract-langpack-eng", "tesseract-langpack-por", "wl-clipboard"]
       },
       "appimage": {
         "bundleMediaFramework": true
