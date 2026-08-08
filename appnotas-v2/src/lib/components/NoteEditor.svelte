@@ -11,6 +11,7 @@
 	import { settingsStore } from '$lib/stores/settings';
 	import { focusArea } from '$lib/stores/focus';
 	import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+	import { convertFileSrc } from '@tauri-apps/api/core';
 	import TipTapEditor from './TipTapEditor.svelte';
 	import AIPalette from './AIPalette.svelte';
 	import CommandPalette from './CommandPalette.svelte';
@@ -235,6 +236,28 @@
 		}
 	}
 
+	/** `@image`: pick an image and inline it through the resizable image node. */
+	async function handleImageInsert() {
+		try {
+			const selected = await openFileDialog({
+				multiple: false,
+				directory: false,
+				filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }]
+			});
+			if (!selected || typeof selected !== 'string') return;
+
+			const tiptap = editor.getEditor();
+			// The webview cannot load a bare filesystem path; the asset protocol
+			// is what makes a local file reachable from inside it.
+			tiptap?.chain().focus().insertContent({
+				type: 'resizableImage',
+				attrs: { src: convertFileSrc(selected), alt: selected.split(/[\\/]/).pop() ?? '' }
+			}).run();
+		} catch (err) {
+			console.error('Failed to insert image:', err);
+		}
+	}
+
 	function handleCommand(id: string) {
 		const tiptap = editor.getEditor();
 		if (!tiptap) return;
@@ -243,26 +266,8 @@
 			case 'tasks':
 				tiptap.chain().focus().toggleTaskList().run();
 				break;
-			case 'heading1':
-				tiptap.chain().focus().toggleHeading({ level: 1 }).run();
-				break;
-			case 'heading2':
-				tiptap.chain().focus().toggleHeading({ level: 2 }).run();
-				break;
-			case 'bullet-list':
-				tiptap.chain().focus().toggleBulletList().run();
-				break;
-			case 'ordered-list':
-				tiptap.chain().focus().toggleOrderedList().run();
-				break;
-			case 'code-block':
-				handleCodeInsert();
-				break;
-			case 'quote':
-				tiptap.chain().focus().toggleBlockquote().run();
-				break;
-			case 'divider':
-				tiptap.chain().focus().setHorizontalRule().run();
+			case 'image':
+				handleImageInsert();
 				break;
 			case 'drawing':
 				tiptap.chain().focus().insertContent({
@@ -270,11 +275,9 @@
 					attrs: { lines: [] }
 				}).run();
 				break;
-            case 'ai':
-                // Trigger AI logic
-                const event = new CustomEvent('app:ai-trigger');
-                window.dispatchEvent(event);
-                break;
+			case 'style':
+				settingsStore.toggleMenus();
+				break;
 		}
 	}
 	

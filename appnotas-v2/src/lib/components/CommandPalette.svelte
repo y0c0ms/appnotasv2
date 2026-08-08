@@ -10,8 +10,7 @@
 		{ id: 'tasks', label: '@tasks', description: 'Insert checklist', icon: '✅', category: 'notes' },
 		{ id: 'image', label: '@image', description: 'Insert image', icon: '🖼️', category: 'notes' },
 		{ id: 'drawing', label: '@drawing', description: 'Insert drawing', icon: '🎨', category: 'notes' },
-		{ id: 'style', label: '@style', description: 'Toggle editor formatting menus', icon: '✨', category: 'notes' },
-		{ id: 'ai', label: '@AI', description: 'Ask AI for help', icon: '✨', category: 'all' }
+		{ id: 'style', label: '@style', description: 'Toggle editor formatting menus', icon: '✨', category: 'notes' }
 	];
 
 	let searchQuery = $state('');
@@ -39,20 +38,15 @@
 	});
 
 	function selectCommand(commandId: string) {
-		console.log('Command selected:', commandId);
-		
+		// `code` and `file` open their own dialogs; everything else is an editor
+		// action the parent applies. Every id in `commands` must land in one of
+		// these branches — a missing one is a command that silently does nothing.
 		if (commandId === 'code') {
 			dispatch('openCodeDialog');
 		} else if (commandId === 'file') {
 			dispatch('openFileDialog');
-		} else if (commandId === 'list' || commandId === 'tasks') {
-			dispatch('openDialog', { id: 'tasks' });
-		} else if (commandId === 'image') {
-			dispatch('openDialog', { id: 'image' });
-		} else if (commandId === 'drawing') {
-			dispatch('openDialog', { id: 'drawing' });
-		} else if (commandId === 'style') {
-			dispatch('openDialog', { id: 'style' });
+		} else {
+			dispatch('openDialog', { id: commandId });
 		}
 	}
 
