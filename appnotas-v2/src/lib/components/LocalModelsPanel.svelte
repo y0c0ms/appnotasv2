@@ -26,6 +26,7 @@
 		FileText,
 		History,
 		Wand2,
+		Zap,
 		ArrowRightFromLine
 	} from 'lucide-svelte';
 
@@ -460,6 +461,16 @@
 				{p.label}
 			</button>
 		{/each}
+		<button
+			class="preset-chip fast-toggle"
+			class:on={$settingsStore.localAiFastMode}
+			onclick={() => settingsStore.update(s => ({ ...s, localAiFastMode: !s.localAiFastMode }))}
+			title={$settingsStore.localAiFastMode
+				? 'Fast mode on — reasoning models skip their <think> block (much quicker, same answer for edits and translation)'
+				: 'Fast mode off — reasoning models think before answering (slower, better on hard questions)'}
+		>
+			<Zap size={10} /> Fast
+		</button>
 	</div>
 
 	<!-- OCR Preview Chip -->
@@ -730,6 +741,20 @@
 		background: #272730;
 		border-color: #3b82f6;
 		color: #ffffff;
+	}
+
+	/* Pinned to the right so it reads as a mode switch, not another preset. */
+	.fast-toggle {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25em;
+	}
+
+	.fast-toggle.on {
+		background: #1d3a1f;
+		border-color: #4ade80;
+		color: #4ade80;
 	}
 
 	.bubble-actions {

@@ -109,12 +109,42 @@ describe('StreamDecoder, OpenAI server-sent events', () => {
 });
 
 describe('chatRequestBody', () => {
-	it('omits the tools field entirely when a server rejected it', () => {
-		const body = JSON.parse(chatRequestBody(OPENAI, [{ role: 'user', content: 'hi' }], null));
+	const NOTHING = { tools: null, suppressReasoning: false };
+	const TOOLS = { tools: [], suppressReasoning: false };
+
+	it('omits both extras when a server rejected them', () => {
+		const body = JSON.parse(chatRequestBody(OPENAI, [{ role: 'user', content: 'hi' }], NOTHING));
 
 		expect(body).not.toHaveProperty('tools');
+		expect(body).not.toHaveProperty('chat_template_kwargs');
 		expect(body.stream).toBe(true);
 		expect(body.model).toBe('qwen2.5-coder-7b');
+	});
+
+	// Fast mode is the difference between a 5s and a 0.2s grammar fix on CPU,
+	// and each protocol spells the switch differently.
+	it('suppresses reasoning through the chat template on OpenAI servers', () => {
+		const body = JSON.parse(
+			chatRequestBody(OPENAI, [{ role: 'user', content: 'hi' }], {
+				tools: null,
+				suppressReasoning: true
+			})
+		);
+
+		expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+		expect(body).not.toHaveProperty('think');
+	});
+
+	it('suppresses reasoning with the native flag on Ollama', () => {
+		const body = JSON.parse(
+			chatRequestBody(OLLAMA, [{ role: 'user', content: 'hi' }], {
+				tools: null,
+				suppressReasoning: true
+			})
+		);
+
+		expect(body.think).toBe(false);
+		expect(body).not.toHaveProperty('chat_template_kwargs');
 	});
 
 	it('sends OpenAI tool arguments as a JSON string and pairs results by id', () => {
@@ -129,7 +159,7 @@ describe('chatRequestBody', () => {
 					},
 					{ role: 'tool', content: '[]', toolCallId: 'call_abc' }
 				],
-				[]
+				TOOLS
 			)
 		);
 
@@ -153,7 +183,7 @@ describe('chatRequestBody', () => {
 					},
 					{ role: 'tool', content: '[]', toolCallId: 'call_abc' }
 				],
-				[]
+				TOOLS
 			)
 		);
 

@@ -78,21 +78,48 @@ function toWire(api: LocalApi, message: WireMessage): Record<string, unknown> {
 	return base;
 }
 
+/** Extras layered on top of a plain completion, dropped together on retry. */
+export interface RequestExtras {
+	tools: unknown[] | null;
+	/**
+	 * Suppress a reasoning model's chain of thought.
+	 *
+	 * Reasoning-tuned models (Qwen3, DeepSeek-R1 and friends) emit a long
+	 * `<think>` block before the answer. Measured on this machine, Qwen3 0.6B
+	 * on CPU takes 5.5s and 349 tokens to fix one sentence of grammar with
+	 * thinking on, and 0.17s / 10 tokens with it off — same corrected sentence.
+	 * For grammar, translation and reformatting the reasoning buys nothing and
+	 * costs everything, so it is off by default.
+	 */
+	suppressReasoning: boolean;
+}
+
 /**
- * Body for a streamed chat completion. `tools` is omitted entirely when null,
- * which is how a server that rejects tool definitions gets retried.
+ * Body for a streamed chat completion.
+ *
+ * Both extras are omitted when unset, which is how a server that rejects them
+ * gets retried with a plain request.
  */
 export function chatRequestBody(
 	target: ModelTarget,
 	messages: WireMessage[],
-	tools: unknown[] | null
+	extras: RequestExtras
 ): string {
 	const body: Record<string, unknown> = {
 		model: target.model,
 		messages: messages.map(message => toWire(target.api, message)),
 		stream: true
 	};
-	if (tools) body.tools = tools;
+	if (extras.tools) body.tools = extras.tools;
+	if (extras.suppressReasoning) {
+		if (target.api === 'ollama') {
+			body.think = false;
+		} else {
+			// llama.cpp and vLLM forward these into the model's chat template,
+			// which is where Qwen3 decides whether to open a `<think>` block.
+			body.chat_template_kwargs = { enable_thinking: false };
+		}
+	}
 	return JSON.stringify(body);
 }
 

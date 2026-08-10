@@ -35,6 +35,10 @@ export interface AppSettings {
      *  defaults (Ollama, LM Studio, llama.cpp, vLLM, Jan, KoboldCpp, TabbyAPI).
      *  For a box on the LAN or a server on a non-standard port. */
     localAiEndpoints: string[];
+    /** Tell reasoning models (Qwen3, DeepSeek-R1, ...) to skip their `<think>`
+     *  block. On CPU that is the difference between ~5s and ~0.2s for a grammar
+     *  fix, with the same answer, so it is on by default. */
+    localAiFastMode: boolean;
     /** Local server the Models panel selected last, so the choice survives a
      *  restart. Empty until the user picks one. */
     lastLocalRuntimeId: string;
@@ -84,6 +88,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     modelsSidebarWidth: 340,
     modelsSidebarOpen: false,
     localAiEndpoints: [],
+    localAiFastMode: true,
     lastLocalRuntimeId: '',
     lastLocalModel: ''
 };

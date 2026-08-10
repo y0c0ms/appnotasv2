@@ -6,6 +6,7 @@ import {
 	chatRequestBody,
 	StreamDecoder,
 	type ModelTarget,
+	type RequestExtras,
 	type ToolCall,
 	type WireMessage
 } from '$lib/services/localRuntimes';
@@ -228,9 +229,9 @@ function createLocalChatStore() {
 	const activeIdStore = writable<string>(initialActiveId);
 	const isStreamingStore = writable<boolean>(false);
 
-	/** Servers that answered a `tools` payload with an error, so the next turn
-	 *  skips it instead of failing again. */
-	const toolsRejected = new Set<string>();
+	/** Servers that errored on the tools / chat-template extras, so the next
+	 *  turn sends a plain request instead of failing again. */
+	const extrasRejected = new Set<string>();
 
 	sessionsStore.subscribe(sessions => {
 		if (typeof window !== 'undefined') {
@@ -328,7 +329,7 @@ function createLocalChatStore() {
 		const last = session?.messages[session.messages.length - 1];
 		const base = last?.role === 'assistant' ? last.content : '';
 
-		async function send(tools: unknown[] | null): Promise<string> {
+		async function send(extras: RequestExtras): Promise<string> {
 			const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 			// A separate decoder from the reconciling one below: this one only
 			// has to turn each arriving line into visible text.
@@ -345,7 +346,7 @@ function createLocalChatStore() {
 					req: {
 						id: requestId,
 						url: target.chatUrl,
-						body: chatRequestBody(target, messages, tools)
+						body: chatRequestBody(target, messages, extras)
 					}
 				});
 			} finally {
@@ -353,19 +354,26 @@ function createLocalChatStore() {
 			}
 		}
 
+		const plain: RequestExtras = { tools: null, suppressReasoning: false };
+		const wanted: RequestExtras = {
+			tools: MCP_TOOLS,
+			suppressReasoning: get(settingsStore).localAiFastMode
+		};
+
 		let full: string;
 		try {
-			full = await send(toolsRejected.has(target.runtimeId) ? null : MCP_TOOLS);
+			full = await send(extrasRejected.has(target.runtimeId) ? plain : wanted);
 		} catch (err: unknown) {
 			// Servers meant for plain completion (KoboldCpp, older llama.cpp
-			// builds) reject a `tools` field outright. The system prompt already
-			// describes the tools, so the turn still works without the field and
-			// `extractTextToolCalls` recovers whatever the model writes as text.
-			if (toolsRejected.has(target.runtimeId)) throw err;
-			toolsRejected.add(target.runtimeId);
-			console.warn(`⚠️ [Local AI] ${target.label} rejected tool definitions; retrying without them.`);
+			// builds) reject a `tools` field outright, and some reject unknown
+			// keys like `chat_template_kwargs`. Drop both and retry: the system
+			// prompt still describes the tools and `extractTextToolCalls`
+			// recovers whatever the model writes as text.
+			if (extrasRejected.has(target.runtimeId)) throw err;
+			extrasRejected.add(target.runtimeId);
+			console.warn(`⚠️ [Local AI] ${target.label} rejected tools/template options; retrying plain.`);
 			mutateLastAssistant(sessionId, () => base);
-			full = await send(null);
+			full = await send(plain);
 		}
 
 		const decoder = new StreamDecoder(target.api);
