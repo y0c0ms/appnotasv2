@@ -4,6 +4,8 @@
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { marked } from 'marked';
 	import { settingsStore } from '$lib/stores/settings';
+	import { activeNoteContent } from '$lib/stores/notes';
+	import { currentEditor } from '$lib/stores/editorStore';
 	import { 
 		localChatStore, 
 		type ChatSession, 
@@ -22,7 +24,9 @@
 		Trash2, 
 		Sparkles,
 		FileText,
-		History
+		History,
+		Wand2,
+		ArrowRightFromLine
 	} from 'lucide-svelte';
 
 	/** A send parked while another turn is streaming; the target is captured at
@@ -42,12 +46,20 @@
 	let isOcrLoading = $state<boolean>(false);
 	let isDiscovering = $state<boolean>(false);
 	let currentOcrText = $state<string>('');
+	let insertedIndex = $state<number | null>(null);
 	let sendQueue = $state<QueuedSend[]>([]);
 	let copiedIndex = $state<number | null>(null);
 	let statusText = $state<string>('Ready');
 	let showHistoryMenu = $state<boolean>(false);
 	let chatContainer = $state<HTMLDivElement | null>(null);
 
+	const PRESETS = [
+		{ label: 'Summarize', prompt: 'Summarize into concise bullet points:' },
+		{ label: 'Improve', prompt: 'Rewrite to be clearer, engaging, and professional:' },
+		{ label: 'Grammar', prompt: 'Fix any grammar and spelling mistakes:' },
+		{ label: 'To List', prompt: 'Convert into a well-organized bulleted list:' },
+		{ label: 'Refactor', prompt: 'Refactor this code for efficiency and clean readability:' }
+	];
 	const sessions = localChatStore.sessions;
 	const activeId = localChatStore.activeId;
 	const isStreaming = localChatStore.isStreaming;
@@ -254,6 +266,43 @@
 		}, 2000);
 	}
 
+	function applyPreset(presetPrompt: string) {
+		if (!userInput.trim()) {
+			userInput = presetPrompt;
+		} else {
+			userInput = `${presetPrompt}\n\n${userInput}`;
+		}
+	}
+
+	function attachActiveNote() {
+		if (!$activeNoteContent) {
+			statusText = 'No active note content to attach.';
+			return;
+		}
+		const noteText = $activeNoteContent.trim();
+		if (!userInput.trim()) {
+			userInput = `Context from active note:\n\`\`\`markdown\n${noteText}\n\`\`\``;
+		} else {
+			userInput = `${userInput}\n\nContext from active note:\n\`\`\`markdown\n${noteText}\n\`\`\``;
+		}
+		statusText = 'Attached active note content to prompt.';
+	}
+
+	function insertIntoEditor(text: string, index: number) {
+		const editorInst = $currentEditor || (window as any).tiptapEditor;
+		if (editorInst && typeof editorInst.chain === 'function') {
+			editorInst.chain().focus().insertContent(text).run();
+			insertedIndex = index;
+			statusText = 'Inserted output into active note.';
+			setTimeout(() => {
+				if (insertedIndex === index) insertedIndex = null;
+			}, 2000);
+		} else {
+			copyToClipboard(text, index);
+			statusText = 'No active editor found — copied output to clipboard instead.';
+		}
+	}
+
 	function renderMarkdown(content: string): string {
 		if (!content) return '';
 		try {
@@ -387,6 +436,7 @@
 	{/if}
 
 	<!-- OCR Action Toolbar -->
+	<!-- Context & Media Toolbar -->
 	<div class="ocr-toolbar">
 		<button class="ocr-btn" onclick={handleClipboardOcr} disabled={isOcrLoading}>
 			<Clipboard size={13} />
@@ -396,6 +446,20 @@
 			<ImageIcon size={13} />
 			<span>Attach File</span>
 		</button>
+		<button class="ocr-btn" onclick={attachActiveNote} disabled={!$activeNoteContent}>
+			<FileText size={13} />
+			<span>Attach Note</span>
+		</button>
+	</div>
+
+	<!-- Prompt Presets Bar -->
+	<div class="presets-toolbar">
+		<span class="presets-label"><Wand2 size={11} /> Presets:</span>
+		{#each PRESETS as p}
+			<button class="preset-chip" onclick={() => applyPreset(p.prompt)} title={p.prompt}>
+				{p.label}
+			</button>
+		{/each}
 	</div>
 
 	<!-- OCR Preview Chip -->
@@ -426,13 +490,24 @@
 				<div class="chat-bubble {msg.role}">
 					<div class="bubble-header">
 						<span class="role-name">{msg.role === 'user' ? 'You' : (currentSession?.model || 'Assistant')}</span>
-						<button class="copy-btn" onclick={() => copyToClipboard(msg.content, idx)} title="Copy text">
-							{#if copiedIndex === idx}
-								<Check size={12} color="#4aff4a" />
-							{:else}
-								<Copy size={12} />
+						<div class="bubble-actions">
+							{#if msg.role === 'assistant' && msg.content.trim()}
+								<button class="copy-btn" onclick={() => insertIntoEditor(msg.content, idx)} title="Insert into active note editor">
+									{#if insertedIndex === idx}
+										<Check size={12} color="#4aff4a" />
+									{:else}
+										<ArrowRightFromLine size={12} />
+									{/if}
+								</button>
 							{/if}
-						</button>
+							<button class="copy-btn" onclick={() => copyToClipboard(msg.content, idx)} title="Copy text">
+								{#if copiedIndex === idx}
+									<Check size={12} color="#4aff4a" />
+								{:else}
+									<Copy size={12} />
+								{/if}
+							</button>
+						</div>
 					</div>
 					
 					{#if msg.role === 'assistant'}
@@ -619,6 +694,48 @@
 	.history-list {
 		overflow-y: auto;
 		max-height: 180px;
+	}
+	.presets-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 0.35em;
+		padding: 0.4em 0.8em;
+		background: #121215;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+		overflow-x: auto;
+	}
+
+	.presets-label {
+		display: flex;
+		align-items: center;
+		gap: 0.3em;
+		font-size: 0.68em;
+		color: #a1a1aa;
+		white-space: nowrap;
+	}
+
+	.preset-chip {
+		background: #1e1e24;
+		color: #d4d4d8;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		border-radius: 12px;
+		padding: 0.15em 0.55em;
+		font-size: 0.66em;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: background 0.15s, border-color 0.15s;
+	}
+
+	.preset-chip:hover {
+		background: #272730;
+		border-color: #3b82f6;
+		color: #ffffff;
+	}
+
+	.bubble-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4em;
 	}
 
 	.history-item {

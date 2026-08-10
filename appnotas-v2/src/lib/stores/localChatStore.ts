@@ -113,37 +113,14 @@ const TOOL_NAMES: Record<string, true> = Object.fromEntries(
 );
 
 /**
- * How much prior conversation is replayed to the model.
- *
- * Local models here run with an 8k context; a long transcript pushes the tool
- * advertisement out of the window (the model then answers "I have no access to
- * your files") and makes every prompt re-evaluation slower on CPU.
+ * Bound history depth to 4 messages (~500 tokens max) so small local models
+ * (2k-4k context window) don't clip system instructions or stall on CPU.
  */
-const HISTORY_MESSAGES = 8;
+const HISTORY_MESSAGES = 4;
 
-/**
- * Tools are also described in the prompt, not just in the `tools` field.
- *
- * A server can only expose the `tools` field to models whose chat template
- * renders it; a locally registered GGUF with a plain template silently drops
- * it, and some servers reject the field outright. Stating the contract in a
- * system message is what actually makes the local MCP tools reachable, and it
- * stays in sync with `MCP_TOOLS` because it is generated here.
- */
 const TOOL_SYSTEM_PROMPT = [
-	'You are the assistant inside AppNotas and you can operate the user\'s local notes through tools.',
-	'',
-	'Available tools:',
-	...MCP_TOOLS.map(t => {
-		const params = Object.keys(t.function.parameters?.properties ?? {}).join(', ') || 'no arguments';
-		return `- ${t.function.name}(${params}): ${t.function.description}`;
-	}),
-	'',
-	'To call a tool, reply with ONLY this JSON object and nothing else:',
-	'{"name": "<tool name>", "arguments": {<arguments>}}',
-	'',
-	'The result comes back as a tool message; then answer the user in plain prose using it.',
-	'Never claim you cannot read local files — use the tools instead.'
+	'You are the AppNotas assistant. Tools: ' + MCP_TOOLS.map(t => t.function.name).join(', ') + '.',
+	'To call a tool, output JSON ONLY: {"name": "<tool>", "arguments": {<args>}}'
 ].join('\n');
 
 function asToolCall(value: unknown): ToolCall | null {
